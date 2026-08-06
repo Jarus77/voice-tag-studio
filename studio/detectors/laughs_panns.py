@@ -21,7 +21,13 @@ import numpy as np
 from .base import Detector
 
 PANNS_SR = 32000
-EMIT_THRESHOLD = 0.20
+# Calibration observed on real data (2026-08-06):
+#   overt/audience laughter  -> 0.32-0.43
+#   conversational chuckles  -> 0.05-0.18
+#   laugh-free speech        -> ~0.002
+# Emit low and let the audition ear decide (UI sorts by score); accept
+# thresholds move AFTER per-tag precision estimates, never before.
+EMIT_THRESHOLD = 0.05
 LAUGH_CLASSES = ["Laughter", "Giggle", "Snicker", "Belly laugh", "Chuckle, chortle"]
 
 _sed = None  # lazy singleton — checkpoint load is ~seconds

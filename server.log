@@ -1,2 +1,0 @@
-/Users/suraj/miniconda3/lib/python3.13/site-packages/panns_inference/pytorch_utils.py:11: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /Users/runner/work/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:219.)
-  x = torch.Tensor(x)

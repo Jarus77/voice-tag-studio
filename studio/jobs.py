@@ -69,11 +69,13 @@ class JobStore:
             jf = d / "job.json"
             if d.is_dir() and jf.exists():
                 job = read_json(jf)
-                # anything marked running when the server died is stale
+                # anything marked running/queued when the server died is stale
                 for st in job.get("stages", {}).values():
                     if st.get("status") == "running":
                         st["status"] = "error"
                         st["msg"] = "interrupted (server restart)"
+                    elif st.get("status") == "queued":
+                        st["status"] = "pending"
                 self._status[d.name] = job
                 self._refresh_done(d.name)
 
@@ -182,12 +184,20 @@ class JobStore:
                 else:
                     self.set_stage(vid, stage, status="done", msg="", progress=1.0)
             except Exception as e:
-                traceback.print_exc()
+                # record FIRST — a dead stdout (broken pipe) must never lose
+                # the error or kill the runner thread
                 err = f"{type(e).__name__}: {str(e)[:250]}"
-                if is_det:
-                    self.set_detector(vid, det_name, status="error", msg=err)
-                else:
-                    self.set_stage(vid, stage, status="error", msg=err)
+                try:
+                    if is_det:
+                        self.set_detector(vid, det_name, status="error", msg=err)
+                    else:
+                        self.set_stage(vid, stage, status="error", msg=err)
+                except Exception:
+                    pass
+                try:
+                    traceback.print_exc()
+                except Exception:
+                    pass
             finally:
                 self._busy = None
                 self._queue.task_done()

@@ -222,8 +222,10 @@ function renderTracks() {
     canvas.addEventListener("click", (ev) => {
       const tr = state.tracks.get(s.name);
       if (!tr?.peaks) return;
-      player.currentTime = (ev.offsetX / canvas.clientWidth) * tr.peaks.duration;
+      // clicking a lane = "I want to hear THIS track from THIS point"
+      const t = (ev.offsetX / canvas.clientWidth) * tr.peaks.duration;
       state.playStopAt = null;
+      makeAudible(s.name, t);
       player.play().catch(() => {});
     });
     row.append(label, canvas);
@@ -239,17 +241,26 @@ function renderTracks() {
   else if (!player.src) makeAudible(state.audible);
 }
 
-function makeAudible(name) {
+function makeAudible(name, seekTo) {
   const tr = state.tracks.get(name);
   if (!tr) return;
-  const t = player.currentTime || 0;
+  const t = seekTo != null ? seekTo : (player.currentTime || 0);
   const wasPlaying = !player.paused;
+  const changed = state.audible !== name || !player.src.endsWith(tr.path);
   state.audible = name;
-  player.src = tr.path;
-  player.currentTime = t;
-  if (wasPlaying) player.play().catch(() => {});
+  if (changed) {
+    player.src = tr.path;
+    // seeking before metadata loads is unreliable — apply it on loadedmetadata
+    player.addEventListener("loadedmetadata", () => {
+      player.currentTime = t;
+      if (wasPlaying) player.play().catch(() => {});
+    }, { once: true });
+    player.load();
+  } else {
+    player.currentTime = t;
+  }
   state.tracks.forEach((v, k) => v.row.classList.toggle("audible", k === name));
-  $("audibleLabel").textContent = name.replace("SPEAKER_", "S");
+  $("audibleLabel").textContent = name.replace("SPEAKER_", "S") + " 🔊";
 }
 
 const player = $("player");

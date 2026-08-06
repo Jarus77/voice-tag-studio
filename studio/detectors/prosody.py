@@ -23,6 +23,8 @@ CACHE = "manifests/prosody_features.json"
 def features(job_dir: Path, segments: list[dict], report) -> dict[str, dict]:
     cache_path = job_dir / CACHE
     cached = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+    # errored entries are retried, not kept forever
+    cached = {k: v for k, v in cached.items() if "error" not in v}
     todo = [s for s in segments if s["seg_id"] not in cached]
     if not todo:
         return cached
@@ -46,13 +48,16 @@ def features(job_dir: Path, segments: list[dict], report) -> dict[str, dict]:
             n = len(x) // frame
             rms = np.sqrt((x[:n * frame].reshape(n, frame) ** 2).mean(axis=1))
             active = rms > max(np.percentile(rms, 10) * 3, rms.max() * 0.05)
+            # pyin and the RMS grid have slightly different frame counts
+            # (window padding) — align before masking
+            m = min(len(v), len(active))
+            va, aa = v[:m], active[:m]
             st = np.log2(f0v) * 12 if len(f0v) else np.array([])
             nw = len(words_of.get(seg["seg_id"], []))
             cached[seg["seg_id"]] = {
                 "f0_mean": round(float(f0v.mean()), 2) if len(f0v) else None,
                 "f0_std_st": round(float(st.std()), 3) if len(st) > 3 else None,
-                "voiced_ratio": round(float(v[active[:len(v)]].mean()), 3)
-                                 if active[:len(v)].any() else 0.0,
+                "voiced_ratio": round(float(va[aa].mean()), 3) if aa.any() else 0.0,
                 "rms": round(float(rms[active].mean()), 5) if active.any() else 0.0,
                 "rate_wps": round(nw / seg["dur"], 2) if nw else None,
             }

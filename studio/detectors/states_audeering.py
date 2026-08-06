@@ -103,9 +103,16 @@ class StatesAudeering(Detector):
         processor, model, device = _load()
         pros = features(job_dir, segments, report)
 
-        # pass 1: raw arousal/valence per segment
-        av: dict[str, tuple[float, float]] = {}
-        for i, seg in enumerate(segments):
+        # pass 1: raw arousal/valence per segment (cached — the model pass is
+        # the expensive part; percentile mapping is free to re-run)
+        import json as _json
+        av_cache_path = job_dir / "manifests" / "av_features.json"
+        av: dict[str, tuple[float, float]] = {
+            k: tuple(v) for k, v in
+            (_json.loads(av_cache_path.read_text()) if av_cache_path.exists() else {}).items()
+        }
+        todo = [s for s in segments if s["seg_id"] not in av]
+        for i, seg in enumerate(todo):
             try:
                 x, sr = sf.read(job_dir / seg["wav"], dtype="float32")
                 inp = processor(x, sampling_rate=sr, return_tensors="pt")
@@ -114,9 +121,11 @@ class StatesAudeering(Detector):
                 av[seg["seg_id"]] = (float(y[0]), float(y[2]))   # arousal, valence
             except Exception:
                 pass
-            if (i + 1) % 25 == 0 or i + 1 == len(segments):
-                report(f"arousal/valence {i + 1}/{len(segments)}",
-                       0.1 + 0.75 * (i + 1) / len(segments))
+            if (i + 1) % 25 == 0 or i + 1 == len(todo):
+                report(f"arousal/valence {i + 1}/{len(todo)}",
+                       0.1 + 0.75 * (i + 1) / len(todo))
+                av_cache_path.write_text(_json.dumps({k: list(v) for k, v in av.items()}))
+        av_cache_path.write_text(_json.dumps({k: list(v) for k, v in av.items()}))
 
         # pass 2: per-speaker percentiles -> region map
         by_spk: dict[str, list[dict]] = {}

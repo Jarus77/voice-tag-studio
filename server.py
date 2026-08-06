@@ -142,12 +142,17 @@ def get_job(vid: str) -> dict:
 
 
 @app.post("/api/jobs/{vid}/stages/{stage}")
-def rerun_stage(vid: str, stage: str, force: bool = False) -> dict:
+def rerun_stage(vid: str, stage: str, force: bool = False,
+                engine: str | None = None) -> dict:
     if stage not in STAGE_ORDER:
         raise HTTPException(404, f"unknown stage {stage}")
     job = store.get(vid)
     if job is None:
         raise HTTPException(404, "no such job")
+    if stage == "asr" and engine:
+        if engine not in ("srota", "sarvam"):
+            raise HTTPException(400, "engine must be srota or sarvam")
+        store.set_field(vid, "asr_engine", engine)
     if stage == "ingest":
         url = job.get("url", "")
         fn = lambda d, r: s0_ingest.run(d, r, url)  # noqa: E731

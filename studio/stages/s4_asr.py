@@ -65,12 +65,52 @@ def sarvam_transcribe(wav: Path, key: str) -> dict:
         return {"error": f"{type(e).__name__}: {str(e)[:160]}"}
 
 
+def _run_sarvam_all(job_dir: Path, segments: list[dict], report) -> None:
+    """Full-corpus Sarvam transcription (engine=sarvam). ~55 rpm rate cap."""
+    import time
+    load_env()
+    key = os.environ.get("SARVAM_API_KEY", "")
+    if not key:
+        raise RuntimeError("SARVAM_API_KEY missing in .env")
+    rows = []
+    min_interval = 60.0 / 55.0
+    last = 0.0
+    for i, s in enumerate(segments):
+        wait = min_interval - (time.time() - last)
+        if wait > 0:
+            time.sleep(wait)
+        last = time.time()
+        r = sarvam_transcribe(job_dir / s["wav"], key)
+        text = (r.get("text") or "").strip()
+        rows.append({
+            "seg_id": s["seg_id"],
+            "text": text,
+            "asr": "sarvam:codemix",
+            "language": r.get("language", ""),
+            "script": script_profile(text) if text else None,
+            "error": r.get("error"),
+        })
+        if (i + 1) % 10 == 0 or i + 1 == len(segments):
+            report(f"sarvam: {i + 1}/{len(segments)}", (i + 1) / len(segments))
+    write_jsonl(job_dir / "manifests" / "transcripts.jsonl", rows)
+    n_err = sum(1 for r in rows if r["error"])
+    if n_err == len(rows):
+        raise RuntimeError("every segment failed Sarvam ASR — check key/credits")
+    report(f"done, {n_err} errors", 1.0)
+
+
 def run(job_dir: Path, report) -> None:
-    if not ASR_VENV_PY.exists():
-        raise RuntimeError(".venv-asr missing — see README setup")
     segments = read_jsonl(job_dir / "manifests" / "segments.jsonl")
     if not segments:
         raise RuntimeError("segments.jsonl missing — run segment first")
+
+    from ..manifests import read_json
+    engine = read_json(job_dir / "job.json").get("asr_engine", "srota")
+    if engine == "sarvam":
+        _run_sarvam_all(job_dir, segments, report)
+        return
+    if not ASR_VENV_PY.exists():
+        raise RuntimeError(".venv-asr missing — see README setup")
 
     batch_file = job_dir / "_asr_batch.json"
     out_file = job_dir / "_asr_out.jsonl"

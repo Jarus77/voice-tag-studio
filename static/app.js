@@ -3,54 +3,80 @@
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  vid: null, job: null, pollTimer: null,
+  vid: null, job: null, pollTimer: null, pollFails: 0,
   audible: "original",
   tracks: new Map(),   // name -> {path, peaks, canvas, row}
   segments: [], transcripts: {}, alignments: {}, candidates: [],
   loaded: {},          // manifest name -> true once fetched
   playStopAt: null,    // for ±2s tag playback windows
   spkColor: {},
+  optimistic: {},      // stage -> "queued" set right after a click, until poll confirms
 };
 const COLORS = ["#4da3ff", "#3ecf8e", "#f0b13c", "#ef6461", "#b48ead", "#7fd1d8"];
+const STAGE_EXPLAIN = {
+  ingest: "download audio", diarize: "who speaks when", denoise: "demucs vocals",
+  segment: "2–20s utterances", asr: "srota transcription", align: "word timings",
+};
 
 /* ---------------- boot ---------------- */
 
 async function boot() {
-  const pf = await (await fetch("/api/preflight")).json();
-  const bad = Object.entries(pf.checks).filter(([, c]) => !c.ok);
-  const el = $("preflight");
-  el.classList.remove("hidden");
-  if (pf.ok) {
-    el.classList.add("ok");
-    el.textContent = "preflight OK" + (bad.length
-      ? "  (optional missing: " + bad.map(([n, c]) => `${n} — ${c.msg}`).join(" · ") + ")"
-      : "");
-  } else {
-    el.innerHTML = "<b>preflight problems:</b><br>" + bad
-      .map(([n, c]) => `${n}: ${c.msg}`).join("<br>");
+  try {
+    const pf = await (await fetch("/api/preflight")).json();
+    const bad = Object.entries(pf.checks).filter(([, c]) => !c.ok);
+    if (!pf.ok) banner("<b>preflight problems:</b><br>" +
+      bad.map(([n, c]) => `${n}: ${c.msg}`).join("<br>"), false);
+  } catch { /* handled by poll banner */ }
+  await refreshJobList();
+  const pick = $("jobPicker");
+  if (pick.options.length) selectJob(pick.options[pick.options.length - 1].value);
+  else {
+    $("jobTitle").textContent = "paste a YouTube URL above to start";
+    renderStepper();  // empty skeleton
   }
+}
+
+function banner(html, ok) {
+  const el = $("banner");
+  el.classList.remove("hidden");
+  el.classList.toggle("ok", !!ok);
+  el.innerHTML = html;
+}
+function hideBanner() { $("banner").classList.add("hidden"); }
+
+async function refreshJobList() {
   const jobs = await (await fetch("/api/jobs")).json();
   const pick = $("jobPicker");
+  const cur = state.vid;
+  pick.innerHTML = "";
   jobs.forEach((j) => {
     const o = document.createElement("option");
     o.value = j.video_id;
-    o.textContent = `${j.video_id} ${j.title || ""}`.slice(0, 60);
+    o.textContent = (j.title || j.video_id).slice(0, 40);
     pick.appendChild(o);
   });
-  if (jobs.length) selectJob(jobs[jobs.length - 1].video_id);
+  if (cur) pick.value = cur;
 }
 
 $("urlForm").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const url = $("urlInput").value.trim();
   if (!url) return;
-  const r = await fetch("/api/jobs", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
-  if (!r.ok) { alert((await r.json()).detail || r.status); return; }
-  const d = await r.json();
-  selectJob(d.video_id);
+  const btn = $("runBtn");
+  btn.disabled = true; btn.textContent = "starting…";
+  try {
+    const r = await fetch("/api/jobs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (!r.ok) { banner("could not start job: " + ((await r.json()).detail || r.status)); return; }
+    const d = await r.json();
+    $("urlInput").value = "";
+    await refreshJobList();
+    selectJob(d.video_id);
+  } finally {
+    btn.disabled = false; btn.textContent = "Analyze";
+  }
 });
 
 $("jobPicker").addEventListener("change", (ev) => {
@@ -59,47 +85,107 @@ $("jobPicker").addEventListener("change", (ev) => {
 
 function selectJob(vid) {
   state.vid = vid;
-  state.loaded = {};
+  state.loaded = {}; state.optimistic = {};
   state.segments = []; state.transcripts = {}; state.alignments = {}; state.candidates = [];
   state.tracks.clear();
   $("tracks").innerHTML = "";
+  $("transcript").innerHTML = "";
+  $("hits").innerHTML = "";
+  $("jobPicker").value = vid;
   poll();
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = setInterval(poll, 1500);
 }
 
-/* ---------------- polling + stage pills ---------------- */
+/* ---------------- polling ---------------- */
 
 async function poll() {
   if (!state.vid) return;
-  const r = await fetch(`/api/jobs/${state.vid}`);
-  if (!r.ok) return;
-  state.job = await r.json();
-  renderPills();
+  let j;
+  try {
+    const r = await fetch(`/api/jobs/${state.vid}`);
+    if (!r.ok) throw new Error(r.status);
+    j = await r.json();
+    if (state.pollFails > 2) hideBanner();
+    state.pollFails = 0;
+  } catch {
+    if (++state.pollFails === 3)
+      banner("⚠ server unreachable — is <span style='font-family:var(--mono)'>python server.py</span> running? retrying…");
+    return;
+  }
+  state.job = j;
+  // clear optimistic flags once the server confirms
+  for (const s of Object.keys(state.optimistic))
+    if (["queued", "running"].includes(j.stages[s]?.status)) delete state.optimistic[s];
+  $("jobTitle").textContent = j.title || j.url || "";
+  renderStepper();
+  renderActivity();
   renderTracks();
   await loadManifests();
   renderDetectors();
+  renderEmptyStates();
 }
 
-function renderPills() {
-  const el = $("stagePills");
+/* ---------------- pipeline stepper ---------------- */
+
+const ICONS = { done: "✓", error: "✗", queued: "⋯", pending: "○", running: "" };
+
+function renderStepper() {
+  const el = $("stepper");
   el.innerHTML = "";
-  for (const [name, st] of Object.entries(state.job.stages)) {
-    const pill = document.createElement("span");
-    pill.className = `pill ${st.status || "pending"}`;
-    let extra = "";
-    if (st.status === "running")
-      extra = ` ${Math.round((st.progress || 0) * 100)}%`;
-    pill.innerHTML = `${name}${extra}<small>${st.status === "running" ? (st.msg || "") : st.status === "error" ? "✗" : st.status === "done" ? "✓" : ""}</small>`;
-    pill.title = (st.msg || "") + "  (click to rerun)";
-    pill.onclick = async () => {
-      if (st.status === "running" || st.status === "queued") return;
-      if (!confirm(`rerun stage "${name}"?`)) return;
-      await fetch(`/api/jobs/${state.vid}/stages/${name}?force=true`, { method: "POST" });
-      poll();
-    };
-    el.appendChild(pill);
+  const stages = state.job?.stages ||
+    Object.fromEntries(Object.keys(STAGE_EXPLAIN).map((k) => [k, { status: "pending" }]));
+  let firstError = null;
+  for (const [name, st] of Object.entries(stages)) {
+    let status = st.status || "pending";
+    if (state.optimistic[name]) status = "queued";
+    const step = document.createElement("div");
+    step.className = `step ${status}`;
+    const pct = status === "running" ? Math.round((st.progress || 0) * 100) : null;
+    step.innerHTML =
+      `<span class="icon">${ICONS[status] ?? "○"}</span>` +
+      `<span><span class="name">${name}</span>` +
+      `<span class="sub">${status === "running" ? (st.msg || pct + "%")
+        : status === "queued" ? "queued"
+        : status === "error" ? "failed — click to retry"
+        : STAGE_EXPLAIN[name] || ""}</span></span>` +
+      (status === "running" ? `<span class="stepbar"><i style="width:${pct}%"></i></span>` : "");
+    step.title = st.msg || `${name}: ${status}` + " (click to rerun)";
+    step.onclick = () => rerunStage(name, status);
+    el.appendChild(step);
+    if (!firstError && status === "error") firstError = { name, msg: st.msg };
   }
+  const errEl = $("stageError");
+  if (firstError) {
+    errEl.classList.remove("hidden");
+    errEl.innerHTML = `<b>${firstError.name} failed:</b> ${firstError.msg || "unknown error"}` +
+      ` — <span class="hint">click the step to retry</span>`;
+  } else errEl.classList.add("hidden");
+}
+
+async function rerunStage(name, status) {
+  if (!state.vid || status === "running" || status === "queued") return;
+  if (status === "done" && !confirm(`rerun "${name}"? (its output will be rebuilt)`)) return;
+  state.optimistic[name] = true;
+  renderStepper();
+  await fetch(`/api/jobs/${state.vid}/stages/${name}?force=true`, { method: "POST" });
+  poll();
+}
+
+function renderActivity() {
+  const el = $("activity");
+  const a = state.job?.activity;
+  if (!a || (!a.name && !a.queue_len)) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  let txt = "";
+  if (a.name) {
+    const where = a.video_id === state.vid ? "" :
+      ` on <b>${a.video_id}</b> (another job — this one waits its turn)`;
+    const pct = a.progress != null ? ` · ${Math.round(a.progress * 100)}%` : "";
+    txt = `runner: <b>${a.name}</b>${where}${pct}${a.msg ? " · " + a.msg : ""}`;
+  } else txt = "runner busy";
+  if (a.queue_len) txt += ` · ${a.queue_len} task${a.queue_len > 1 ? "s" : ""} queued`;
+  el.innerHTML = `<span class="icon"></span><span>${txt}</span>`;
 }
 
 /* ---------------- listen: stacked multitrack timeline ---------------- */
@@ -111,12 +197,12 @@ function spkColor(spk) {
 }
 
 function renderTracks() {
-  const secs = ["listenSec", "transcriptSec", "tagsSec"];
-  secs.forEach((s) => $(s).classList.remove("hidden"));
+  ["listenSec", "transcriptSec", "tagsSec"].forEach((s) => $(s).classList.remove("hidden"));
   const holder = $("tracks");
   const sources = state.job.sources || [];
   if (!sources.length) {
-    holder.innerHTML = "<p class='hint' style='padding:8px'>no audio yet — waiting for ingest…</p>";
+    const ing = state.job.stages?.ingest;
+    holder.innerHTML = `<p class="empty" style="padding:10px">no audio yet — ingest is ${ing?.status || "pending"}${state.job.activity && state.job.activity.video_id !== state.vid ? " (waiting for the runner to finish the other job)" : ""}…</p>`;
     return;
   }
   if (holder.querySelector("p")) holder.innerHTML = "";
@@ -129,7 +215,7 @@ function renderTracks() {
     const isSpk = s.name.startsWith("SPEAKER_");
     label.innerHTML =
       (isSpk ? `<span class="dot" style="background:${spkColor(s.name)}"></span>` : "") +
-      `${s.name.replace("SPEAKER_", "S")} <span class="hint">🔊</span>`;
+      s.name.replace("SPEAKER_", "S");
     label.title = "click to make this the audible version (position kept)";
     label.onclick = () => makeAudible(s.name);
     const canvas = document.createElement("canvas");
@@ -163,6 +249,7 @@ function makeAudible(name) {
   player.currentTime = t;
   if (wasPlaying) player.play().catch(() => {});
   state.tracks.forEach((v, k) => v.row.classList.toggle("audible", k === name));
+  $("audibleLabel").textContent = name.replace("SPEAKER_", "S");
 }
 
 const player = $("player");
@@ -188,7 +275,7 @@ function drawTrack(tr, name, segById) {
   if (!tr.peaks || !tr.peaks.bins.length) {
     ctx.fillStyle = "#3a4a5c";
     ctx.font = `${11 * devicePixelRatio}px monospace`;
-    ctx.fillText("loading…", 8, H / 2);
+    ctx.fillText("loading waveform…", 8, H / 2);
     return;
   }
   const bins = tr.peaks.bins;
@@ -199,24 +286,19 @@ function drawTrack(tr, name, segById) {
     const y0 = mid + mn * mid * 0.92, y1 = mid + mx * mid * 0.92;
     ctx.fillRect(i * bw, Math.min(y0, y1), Math.max(1, bw * 0.8), Math.abs(y1 - y0) || 1);
   });
-  // tag markers: on the owning speaker's lane + faintly on original
   const dur = tr.peaks.duration;
   state.candidates.forEach((c) => {
     const seg = segById[c.seg_id];
     if (!seg || c.position_s == null) return;
-    const onLane = name === seg.speaker || name === "original";
-    if (!onLane) return;
+    if (name !== seg.speaker && name !== "original") return;
     const x = ((seg.start + c.position_s) / dur) * W;
     ctx.fillStyle = name === seg.speaker ? "#ff7ab0" : "#ff7ab066";
-    ctx.beginPath();  // ◆ diamond
     const r = 4 * devicePixelRatio;
-    ctx.moveTo(x, 2);
-    ctx.lineTo(x + r, 2 + r);
-    ctx.lineTo(x, 2 + 2 * r);
-    ctx.lineTo(x - r, 2 + r);
+    ctx.beginPath();
+    ctx.moveTo(x, 2); ctx.lineTo(x + r, 2 + r);
+    ctx.lineTo(x, 2 + 2 * r); ctx.lineTo(x - r, 2 + r);
     ctx.fill();
   });
-  // playhead
   const x = (player.currentTime / dur) * W;
   ctx.fillStyle = "#e8eef4";
   ctx.fillRect(x, 0, Math.max(1.5, devicePixelRatio), H);
@@ -257,6 +339,29 @@ async function loadManifests() {
     }
   }
   if (dirty) { renderTranscript(); drawAll(); }
+}
+
+function renderEmptyStates() {
+  const st = state.job.stages;
+  const waitTxt = (need) => {
+    const s = st[need]?.status || "pending";
+    if (s === "done") return "";
+    if (s === "error") return `blocked: <b>${need}</b> failed — click its step above to retry`;
+    if (s === "running") return `waiting for <b>${need}</b> (running now — watch the pipeline above)…`;
+    return `appears after the <b>${need}</b> stage (${s})`;
+  };
+  $("transcriptEmpty").innerHTML = state.segments.length
+    ? (Object.keys(state.transcripts).length ? "" : waitTxt("asr"))
+    : waitTxt("segment");
+  $("transcriptBadge").textContent = state.segments.length
+    ? `${state.segments.length} segments · ${new Set(state.segments.map((s) => s.speaker)).size} speakers`
+    : "";
+  $("hitsEmpty").innerHTML = state.candidates.length ? "" :
+    (state.segments.length
+      ? "no candidates yet — pick a detector and press <b>Run detector</b>"
+      : waitTxt("segment"));
+  $("tagsBadge").textContent = state.candidates.length
+    ? `${state.candidates.length} candidates` : "";
 }
 
 function fmtT(t) {
@@ -312,7 +417,7 @@ function renderTranscript() {
       const chip = document.createElement("span");
       chip.className = `chip status ${al.status}`;
       chip.textContent = al.status;
-      chip.title = `islands: ${JSON.stringify(al.islands || [])}`;
+      chip.title = `unaligned speech islands: ${JSON.stringify(al.islands || [])} — listen here for untranscribed sounds`;
       text.appendChild(chip);
     }
     if (seg.over_len) {
@@ -331,7 +436,7 @@ function makeChip(c, seg) {
   const chip = document.createElement("span");
   chip.className = "chip";
   chip.textContent = `[${c.tag}] ${c.score.toFixed(2)}`;
-  chip.title = JSON.stringify(c.evidence);
+  chip.title = "click to play ±2s around the hit\n" + JSON.stringify(c.evidence);
   chip.onclick = (ev) => { ev.stopPropagation(); playWindow(seg.start + (c.position_s ?? 0)); };
   return chip;
 }
@@ -357,40 +462,54 @@ function renderDetectors() {
     pick.innerHTML = "";
     names.forEach((n) => {
       const o = document.createElement("option");
-      o.value = n; o.textContent = n;
+      o.value = n; o.textContent = `[${n}]`;
       pick.appendChild(o);
     });
   }
   const d = (state.job.detectors || {})[pick.value];
-  $("detStatus").textContent = d
-    ? `${d.status}${d.msg ? " — " + d.msg : ""}` : "";
+  const el = $("detStatus");
+  const btn = $("detRun");
+  if (!d) { el.textContent = ""; el.className = "detStatus"; btn.disabled = false; btn.textContent = "Run detector"; return; }
+  el.className = `detStatus ${d.status}`;
+  el.innerHTML = (d.status === "running" || d.status === "queued")
+    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}`
+    : `${d.status === "done" ? "✓ done" : d.status === "error" ? "✗ " + (d.msg || "failed") : d.status}${d.status === "done" && d.msg ? " — " + d.msg : ""}`;
+  const busy = d.status === "running" || d.status === "queued";
+  btn.disabled = busy;
+  btn.textContent = busy ? "Running…" : "Run detector";
 }
 
 $("detRun").addEventListener("click", async () => {
   const det = $("detPicker").value;
   if (!det) return;
+  const btn = $("detRun");
+  btn.disabled = true; btn.textContent = "Running…";
   state.loaded["cand_" + det] = false;
   const r = await fetch(`/api/jobs/${state.vid}/detect`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ detector: det }),
   });
-  if (!r.ok) alert((await r.json()).detail || r.status);
+  if (!r.ok) {
+    banner("detector: " + ((await r.json()).detail || r.status));
+    btn.disabled = false; btn.textContent = "Run detector";
+  }
+  poll();
 });
 
 function renderHits() {
   const el = $("hits");
-  if (!state.candidates.length) { el.innerHTML = "<p class='hint'>no candidates yet</p>"; return; }
+  if (!state.candidates.length) { el.innerHTML = ""; return; }
   const segById = Object.fromEntries(state.segments.map((s) => [s.seg_id, s]));
   const rows = [...state.candidates].sort((a, b) => b.score - a.score);
   el.innerHTML =
-    "<table><tr><th>#</th><th>tag</th><th>score</th><th>speaker</th><th>at</th><th></th></tr>" +
+    "<table><tr><th>#</th><th>tag</th><th>score</th><th>speaker</th><th>at</th><th>listen</th></tr>" +
     rows.map((c, i) => {
       const seg = segById[c.seg_id] || {};
       const t = (seg.start ?? 0) + (c.position_s ?? 0);
       return `<tr><td>${i + 1}</td><td>[${c.tag}]</td>` +
         `<td class="score">${c.score.toFixed(3)}</td>` +
         `<td>${(seg.speaker || "?").replace("SPEAKER_", "S")}</td>` +
-        `<td>${fmtT(t)}</td>` +
+        `<td style="font-family:var(--mono)">${fmtT(t)}</td>` +
         `<td><button onclick="playWindow(${t})">▶ ±2s</button></td></tr>`;
     }).join("") + "</table>";
 }

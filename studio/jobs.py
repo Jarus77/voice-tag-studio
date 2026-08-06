@@ -123,6 +123,27 @@ class JobStore:
     def busy(self) -> str | None:
         return self._busy
 
+    def activity(self) -> dict | None:
+        """What the runner is doing RIGHT NOW (any job) + queue depth."""
+        with self._lock:
+            vid = self._busy
+            q = self._queue.qsize()
+            if not vid or vid not in self._status:
+                return {"queue_len": q} if q else None
+            j = self._status[vid]
+            for name, st in j["stages"].items():
+                if st.get("status") == "running":
+                    return {"video_id": vid, "kind": "stage", "name": name,
+                            "msg": st.get("msg", ""),
+                            "progress": st.get("progress"), "queue_len": q}
+            for name, st in (j.get("detectors") or {}).items():
+                if st.get("status") == "running":
+                    return {"video_id": vid, "kind": "detector", "name": name,
+                            "msg": st.get("msg", ""), "progress": None,
+                            "queue_len": q}
+            return {"video_id": vid, "kind": "job", "name": "", "msg": "",
+                    "progress": None, "queue_len": q}
+
     def set_field(self, vid: str, key: str, value) -> None:
         with self._lock:
             self._status[vid][key] = value

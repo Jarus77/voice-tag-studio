@@ -137,6 +137,7 @@ def get_job(vid: str) -> dict:
     job["meta"] = meta
     job["detector_names"] = list(DETECTORS)
     job["busy"] = store.busy()
+    job["activity"] = store.activity()
     return job
 
 

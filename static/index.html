@@ -7,37 +7,69 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>voice-tag-studio</h1>
+
+<header class="topbar">
+  <div class="brand">voice-tag-studio</div>
   <form id="urlForm">
-    <input id="urlInput" type="text" placeholder="paste a YouTube URL…" spellcheck="false">
-    <button type="submit">Run</button>
-    <select id="jobPicker" title="previous jobs"><option value="">— jobs —</option></select>
+    <input id="urlInput" type="text" placeholder="paste a YouTube URL and press Analyze…" spellcheck="false">
+    <button type="submit" id="runBtn">Analyze</button>
   </form>
-  <div id="preflight" class="banner hidden"></div>
-  <div id="stagePills" class="pills"></div>
+  <select id="jobPicker" title="switch job"></select>
 </header>
 
-<section id="listenSec" class="hidden">
-  <h2>Listen <span class="hint">stacked tracks, one timeline — click a name to hear that version (position kept), click a waveform to seek, ◆ = tag hits</span></h2>
-  <div id="tracks"></div>
-  <audio id="player" controls preload="metadata"></audio>
+<div id="banner" class="banner hidden"></div>
+
+<main>
+
+<section class="card" id="pipeCard">
+  <div class="cardHead">
+    <h2>Pipeline</h2>
+    <span id="jobTitle" class="hint"></span>
+  </div>
+  <div id="stepper" class="stepper"></div>
+  <div id="stageError" class="stageError hidden"></div>
+  <div id="activity" class="activity hidden"></div>
 </section>
 
-<section id="transcriptSec" class="hidden">
-  <h2>Transcript <span class="hint">click a row to seek · click a word for word-level seek</span></h2>
+<section class="card hidden" id="listenSec">
+  <div class="cardHead">
+    <h2>Listen</h2>
+    <span class="hint">stacked tracks, one timeline · click a <b>name</b> to hear that version (position kept) · click a <b>waveform</b> to seek · ◆ = tag hit</span>
+  </div>
+  <div id="tracks"></div>
+</section>
+
+<section class="card hidden" id="transcriptSec">
+  <div class="cardHead">
+    <h2>Transcript</h2>
+    <span id="transcriptBadge" class="badge"></span>
+    <span class="hint">click a row to seek · click a word for word-level seek</span>
+  </div>
+  <div id="transcriptEmpty" class="empty"></div>
   <div id="transcript"></div>
 </section>
 
-<section id="tagsSec" class="hidden">
-  <h2>Tags <span class="hint">one detector at a time — candidates, sorted by score; your ear is the judge</span></h2>
+<section class="card hidden" id="tagsSec">
+  <div class="cardHead">
+    <h2>Tags</h2>
+    <span id="tagsBadge" class="badge"></span>
+    <span class="hint">one detector at a time — candidates sorted by score; your ear is the judge</span>
+  </div>
   <div class="row">
     <select id="detPicker"></select>
     <button id="detRun">Run detector</button>
-    <span id="detStatus" class="hint"></span>
+    <span id="detStatus" class="detStatus"></span>
   </div>
+  <div id="hitsEmpty" class="empty"></div>
   <div id="hits"></div>
 </section>
+
+</main>
+
+<div id="transport">
+  <span id="audibleLabel" class="audible-label">–</span>
+  <audio id="player" controls preload="metadata"></audio>
+</div>
 
 <script src="app.js"></script>
 </body>

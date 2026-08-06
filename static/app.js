@@ -4,7 +4,8 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   vid: null, job: null, pollTimer: null,
-  source: "original", peaks: null,
+  audible: "original",
+  tracks: new Map(),   // name -> {path, peaks, canvas, row}
   segments: [], transcripts: {}, alignments: {}, candidates: [],
   loaded: {},          // manifest name -> true once fetched
   playStopAt: null,    // for ±2s tag playback windows
@@ -60,6 +61,8 @@ function selectJob(vid) {
   state.vid = vid;
   state.loaded = {};
   state.segments = []; state.transcripts = {}; state.alignments = {}; state.candidates = [];
+  state.tracks.clear();
+  $("tracks").innerHTML = "";
   poll();
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = setInterval(poll, 1500);
@@ -73,7 +76,7 @@ async function poll() {
   if (!r.ok) return;
   state.job = await r.json();
   renderPills();
-  renderSources();
+  renderTracks();
   await loadManifests();
   renderDetectors();
 }
@@ -99,85 +102,124 @@ function renderPills() {
   }
 }
 
-/* ---------------- listen: sources + waveform ---------------- */
+/* ---------------- listen: stacked multitrack timeline ---------------- */
 
-function renderSources() {
+function spkColor(spk) {
+  if (!state.spkColor[spk])
+    state.spkColor[spk] = COLORS[Object.keys(state.spkColor).length % COLORS.length];
+  return state.spkColor[spk];
+}
+
+function renderTracks() {
   const secs = ["listenSec", "transcriptSec", "tagsSec"];
   secs.forEach((s) => $(s).classList.remove("hidden"));
-  const el = $("sourcePicker");
-  const player = $("player");
+  const holder = $("tracks");
   const sources = state.job.sources || [];
-  if (!sources.length) { el.innerHTML = "<span class='hint'>no audio yet — waiting for ingest…</span>"; return; }
-  if (el.childElementCount === sources.length) return; // no change
-  el.innerHTML = "";
+  if (!sources.length) {
+    holder.innerHTML = "<p class='hint' style='padding:8px'>no audio yet — waiting for ingest…</p>";
+    return;
+  }
+  if (holder.querySelector("p")) holder.innerHTML = "";
   sources.forEach((s) => {
-    const pill = document.createElement("span");
-    pill.className = "pill" + (s.name === state.source ? " active" : "");
-    pill.textContent = s.name;
-    pill.onclick = () => switchSource(s);
-    el.appendChild(pill);
+    if (state.tracks.has(s.name)) return;
+    const row = document.createElement("div");
+    row.className = "track" + (s.name === state.audible ? " audible" : "");
+    const label = document.createElement("div");
+    label.className = "tlabel";
+    const isSpk = s.name.startsWith("SPEAKER_");
+    label.innerHTML =
+      (isSpk ? `<span class="dot" style="background:${spkColor(s.name)}"></span>` : "") +
+      `${s.name.replace("SPEAKER_", "S")} <span class="hint">🔊</span>`;
+    label.title = "click to make this the audible version (position kept)";
+    label.onclick = () => makeAudible(s.name);
+    const canvas = document.createElement("canvas");
+    canvas.addEventListener("click", (ev) => {
+      const tr = state.tracks.get(s.name);
+      if (!tr?.peaks) return;
+      player.currentTime = (ev.offsetX / canvas.clientWidth) * tr.peaks.duration;
+      state.playStopAt = null;
+      player.play().catch(() => {});
+    });
+    row.append(label, canvas);
+    holder.appendChild(row);
+    const tr = { path: s.path, peaks: null, canvas, row };
+    state.tracks.set(s.name, tr);
+    fetch(`/api/jobs/${state.vid}/peaks/${s.name}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { tr.peaks = p; drawAll(); })
+      .catch(() => {});
   });
-  const cur = sources.find((s) => s.name === state.source) || sources[0];
-  if (!player.src.endsWith(cur.path)) switchSource(cur);
+  if (!state.tracks.get(state.audible)) makeAudible(sources[0].name);
+  else if (!player.src) makeAudible(state.audible);
 }
 
-async function switchSource(s) {
-  const player = $("player");
+function makeAudible(name) {
+  const tr = state.tracks.get(name);
+  if (!tr) return;
   const t = player.currentTime || 0;
   const wasPlaying = !player.paused;
-  state.source = s.name;
-  player.src = s.path;
+  state.audible = name;
+  player.src = tr.path;
   player.currentTime = t;
   if (wasPlaying) player.play().catch(() => {});
-  document.querySelectorAll("#sourcePicker .pill").forEach((p) =>
-    p.classList.toggle("active", p.textContent === s.name));
-  try {
-    state.peaks = await (await fetch(`/api/jobs/${state.vid}/peaks/${s.name}`)).json();
-  } catch { state.peaks = null; }
-  drawWave();
+  state.tracks.forEach((v, k) => v.row.classList.toggle("audible", k === name));
 }
 
-const wave = $("wave");
 const player = $("player");
 player.addEventListener("timeupdate", () => {
-  drawWave();
+  drawAll();
   if (state.playStopAt != null && player.currentTime >= state.playStopAt) {
     player.pause();
     state.playStopAt = null;
   }
 });
-wave.addEventListener("click", (ev) => {
-  if (!state.peaks) return;
-  const frac = ev.offsetX / wave.clientWidth;
-  player.currentTime = frac * state.peaks.duration;
-  player.play().catch(() => {});
-});
 
-function drawWave() {
-  const ctx = wave.getContext("2d");
-  const W = (wave.width = wave.clientWidth * devicePixelRatio);
-  const H = wave.height;
+function drawAll() {
+  const segById = Object.fromEntries(state.segments.map((s) => [s.seg_id, s]));
+  state.tracks.forEach((tr, name) => drawTrack(tr, name, segById));
+}
+
+function drawTrack(tr, name, segById) {
+  const canvas = tr.canvas;
+  const W = (canvas.width = canvas.clientWidth * devicePixelRatio);
+  const H = (canvas.height = canvas.clientHeight * devicePixelRatio);
+  const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, W, H);
-  if (!state.peaks || !state.peaks.bins.length) return;
-  const bins = state.peaks.bins;
+  if (!tr.peaks || !tr.peaks.bins.length) {
+    ctx.fillStyle = "#3a4a5c";
+    ctx.font = `${11 * devicePixelRatio}px monospace`;
+    ctx.fillText("loading…", 8, H / 2);
+    return;
+  }
+  const bins = tr.peaks.bins;
   const mid = H / 2, bw = W / bins.length;
-  ctx.fillStyle = "#3a4a5c";
+  const isSpk = name.startsWith("SPEAKER_");
+  ctx.fillStyle = isSpk ? spkColor(name) + "99" : "#3a4a5c";
   bins.forEach(([mn, mx], i) => {
-    const y0 = mid + mn * mid * 0.95, y1 = mid + mx * mid * 0.95;
+    const y0 = mid + mn * mid * 0.92, y1 = mid + mx * mid * 0.92;
     ctx.fillRect(i * bw, Math.min(y0, y1), Math.max(1, bw * 0.8), Math.abs(y1 - y0) || 1);
   });
-  // tag markers (absolute time = seg.start + position_s)
-  const segStart = Object.fromEntries(state.segments.map((s) => [s.seg_id, s.start]));
-  ctx.fillStyle = "#ff7ab0";
+  // tag markers: on the owning speaker's lane + faintly on original
+  const dur = tr.peaks.duration;
   state.candidates.forEach((c) => {
-    if (c.position_s == null || segStart[c.seg_id] == null) return;
-    const x = ((segStart[c.seg_id] + c.position_s) / state.peaks.duration) * W;
-    ctx.fillRect(x, 0, 2, H * 0.25);
+    const seg = segById[c.seg_id];
+    if (!seg || c.position_s == null) return;
+    const onLane = name === seg.speaker || name === "original";
+    if (!onLane) return;
+    const x = ((seg.start + c.position_s) / dur) * W;
+    ctx.fillStyle = name === seg.speaker ? "#ff7ab0" : "#ff7ab066";
+    ctx.beginPath();  // ◆ diamond
+    const r = 4 * devicePixelRatio;
+    ctx.moveTo(x, 2);
+    ctx.lineTo(x + r, 2 + r);
+    ctx.lineTo(x, 2 + 2 * r);
+    ctx.lineTo(x - r, 2 + r);
+    ctx.fill();
   });
   // playhead
-  const x = (player.currentTime / state.peaks.duration) * W;
+  const x = (player.currentTime / dur) * W;
   ctx.fillStyle = "#e8eef4";
-  ctx.fillRect(x, 0, 2, H);
+  ctx.fillRect(x, 0, Math.max(1.5, devicePixelRatio), H);
 }
 
 /* ---------------- manifests + transcript ---------------- */
@@ -214,13 +256,7 @@ async function loadManifests() {
       renderHits();
     }
   }
-  if (dirty) renderTranscript();
-}
-
-function spkColor(spk) {
-  if (!state.spkColor[spk])
-    state.spkColor[spk] = COLORS[Object.keys(state.spkColor).length % COLORS.length];
-  return state.spkColor[spk];
+  if (dirty) { renderTranscript(); drawAll(); }
 }
 
 function fmtT(t) {
@@ -259,7 +295,6 @@ function renderTranscript() {
         span.textContent = w.w + " ";
         span.onclick = (ev) => { ev.stopPropagation(); seekPlay(seg.start + w.start); };
         text.appendChild(span);
-        // tag chip after the word containing the hit position
         cands.forEach((c) => {
           if (c.position_s != null && c.position_s >= w.start && c.position_s <= w.end)
             text.appendChild(makeChip(c, seg));
@@ -268,7 +303,6 @@ function renderTranscript() {
     } else {
       text.textContent = tr?.text || (tr?.error ? `⚠ ${tr.error}` : "…");
     }
-    // chips that didn't land inside a word span (or no alignment yet)
     cands.forEach((c) => {
       const placed = al?.words?.some((w) =>
         c.position_s != null && c.position_s >= w.start && c.position_s <= w.end);

@@ -76,7 +76,7 @@ def run(job_dir: Path, report) -> None:
                 ts, te = trimmed
                 if te - ts < MIN_SEG_S:
                     continue
-                over = te - ts > MAX_SEG_S
+                over = bool(te - ts > MAX_SEG_S)  # np.bool_ isn't JSON-serializable
                 seg_id = f"{vid}_{spk}_{n_spk:04d}"
                 dest = seg_dir / spk / f"{seg_id}.wav"
                 dest.parent.mkdir(parents=True, exist_ok=True)

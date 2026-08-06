@@ -1,0 +1,9 @@
+# main env additions (torch/torchaudio/pyannote.audio/transformers/soundfile/
+# librosa/numpy/scipy/uvicorn assumed present — conda base)
+fastapi
+yt-dlp
+demucs
+panns_inference
+noisereduce
+uroman
+requests

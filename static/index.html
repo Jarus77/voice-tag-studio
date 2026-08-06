@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voice-tag-studio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>voice-tag-studio</h1>
+  <form id="urlForm">
+    <input id="urlInput" type="text" placeholder="paste a YouTube URL…" spellcheck="false">
+    <button type="submit">Run</button>
+    <select id="jobPicker" title="previous jobs"><option value="">— jobs —</option></select>
+  </form>
+  <div id="preflight" class="banner hidden"></div>
+  <div id="stagePills" class="pills"></div>
+</header>
+
+<section id="listenSec" class="hidden">
+  <h2>Listen <span class="hint">original vs denoised vs per-speaker — same timeline, A/B keeps position</span></h2>
+  <div id="sourcePicker" class="pills"></div>
+  <canvas id="wave" height="110"></canvas>
+  <audio id="player" controls preload="metadata"></audio>
+</section>
+
+<section id="transcriptSec" class="hidden">
+  <h2>Transcript <span class="hint">click a row to seek · click a word for word-level seek</span></h2>
+  <div id="transcript"></div>
+</section>
+
+<section id="tagsSec" class="hidden">
+  <h2>Tags <span class="hint">one detector at a time — candidates, sorted by score; your ear is the judge</span></h2>
+  <div class="row">
+    <select id="detPicker"></select>
+    <button id="detRun">Run detector</button>
+    <span id="detStatus" class="hint"></span>
+  </div>
+  <div id="hits"></div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

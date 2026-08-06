@@ -1,0 +1,7 @@
+jobs/
+.venv-asr/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+_demucs/

@@ -1,0 +1,4 @@
+# isolated ASR venv — qwen-asr pins transformers==4.57.6 (incompatible with
+# the main env's pyannote 4.x stack; keep this venv separate)
+qwen-asr==0.0.6
+soundfile

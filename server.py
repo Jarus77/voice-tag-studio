@@ -259,6 +259,35 @@ def run_detect(vid: str, body: DetectReq) -> dict:
             "source": body.source or det.source or DETECTOR_SOURCE_DEFAULT}
 
 
+# ---------------- SAM-Audio separation ----------------
+
+class SeparateReq(BaseModel):
+    prompt: str
+    start: float
+    dur: float = 10.0
+    model: str = "facebook/sam-audio-base"
+    reranking: int = 1
+
+
+@app.post("/api/jobs/{vid}/separate")
+def run_separate(vid: str, body: SeparateReq) -> dict:
+    from studio.separate import run_sam
+    job_dir = JOBS_DIR / vid
+    if not (job_dir / "audio" / "original.wav").exists():
+        raise HTTPException(409, "run ingest first")
+    if not body.prompt.strip():
+        raise HTTPException(400, "prompt required")
+
+    p, s, d, m, rr = (body.prompt.strip(), float(body.start), float(body.dur),
+                      body.model, int(body.reranking))
+
+    def fn(dir_: Path, report) -> None:
+        run_sam(dir_, report, p, s, d, model=m, reranking=rr)
+
+    store.enqueue_detect(vid, "separate", fn)
+    return {"queued": True}
+
+
 # ---------------- static ----------------
 
 JOBS_DIR.mkdir(parents=True, exist_ok=True)

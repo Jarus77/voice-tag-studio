@@ -109,17 +109,22 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 
 /* ---------- listen: multitrack ---------- */
 #tracks { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.track { display: grid; grid-template-columns: 118px 1fr; border-bottom: 1px solid var(--line); }
+.track { display: grid; grid-template-columns: 168px 1fr; border-bottom: 1px solid var(--line); }
 .track:last-child { border-bottom: none; }
 .tlabel {
-  padding: 4px 10px; font: 12px var(--mono); color: var(--dim); cursor: pointer;
+  padding: 4px 8px; font: 12px var(--mono); color: var(--dim);
   background: var(--panel); border-right: 1px solid var(--line);
   display: flex; align-items: center; gap: 7px; user-select: none;
-  transition: color .15s;
 }
-.tlabel:hover { color: var(--fg); }
-.track.audible .tlabel { color: var(--acc); }
-.track.audible .tlabel::after { content: "🔊"; margin-left: auto; font-size: 11px; }
+.tlabel .mute {
+  border: none; background: transparent; padding: 2px 4px; font-size: 13px;
+  cursor: pointer; border-radius: 50%; opacity: .5; transition: opacity .15s;
+}
+.tlabel .mute:hover { opacity: 1; }
+.track.audible .tlabel .mute { opacity: 1; }
+.tlabel .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track { opacity: .55; transition: opacity .2s; }
+.track.audible { opacity: 1; }
 .track canvas { width: 100%; height: 62px; display: block; background: var(--bg); cursor: crosshair; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
 

@@ -62,7 +62,10 @@ class Separator:
         if model_name not in self._loaded:
             from sam_audio import SAMAudio, SAMAudioProcessor
 
-            model = SAMAudio.from_pretrained(model_name).eval().cuda()
+            # visual_ranker (ImageBind) is video-prompting-only — disable it
+            # (its import chain breaks in this image, and we prompt with text)
+            model = SAMAudio.from_pretrained(
+                model_name, visual_ranker=None).eval().cuda()
             processor = SAMAudioProcessor.from_pretrained(model_name)
             self._loaded[model_name] = (model, processor)
             cache_vol.commit()
@@ -103,7 +106,7 @@ class Separator:
 
 
 @app.local_entrypoint()
-def main(job: str, start: float = 900.0, dur: float = 60.0,
+def main(job: str, start: float = 900.0, dur: float = 10.0,
          prompt: str = "man speaking",
          model: str = "facebook/sam-audio-base",
          reranking: int = 1) -> None:

@@ -4,8 +4,8 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   vid: null, job: null, pollTimer: null, pollFails: 0,
-  audible: "original",
-  tracks: new Map(),   // name -> {path, peaks, canvas, row}
+  mix: new Set(),      // lane names currently audible (mixed together)
+  tracks: new Map(),   // name -> {path, peaks, canvas, row, audio}
   segments: [], transcripts: {}, alignments: {}, candidates: [],
   loaded: {},          // manifest name -> true once fetched
   playStopAt: null,    // for ±2s tag playback windows
@@ -103,6 +103,48 @@ $("fileInput").addEventListener("change", async (ev) => {
   }
 });
 
+/* ---------------- SAM-Audio isolate panel ---------------- */
+
+$("sepAtPlayhead").addEventListener("click", () => {
+  $("sepStart").value = (player.currentTime || 0).toFixed(1);
+});
+$("sepRun").addEventListener("click", async () => {
+  const prompt = $("sepPrompt").value.trim();
+  if (!prompt) { $("sepPrompt").focus(); return; }
+  const btn = $("sepRun");
+  btn.disabled = true; btn.textContent = "Queued…";
+  const r = await fetch(`/api/jobs/${state.vid}/separate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      start: parseFloat($("sepStart").value || "0"),
+      dur: parseFloat($("sepDur").value || "10"),
+      model: $("sepModel").value,
+      reranking: parseInt($("sepRerank").value, 10),
+    }),
+  });
+  if (!r.ok) {
+    banner("isolate: " + ((await r.json()).detail || r.status));
+    btn.disabled = false; btn.textContent = "Isolate";
+  }
+  poll();
+});
+
+function renderSepStatus() {
+  const d = (state.job.detectors || {}).separate;
+  const el = $("sepStatus");
+  const btn = $("sepRun");
+  if (!d) { el.textContent = ""; return; }
+  const busy = d.status === "running" || d.status === "queued";
+  el.className = `detStatus ${d.status}`;
+  el.innerHTML = busy
+    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}`
+    : d.status === "error" ? `✗ ${d.msg || "failed"}`
+    : `✓ ${d.msg || "done"} — new lanes above`;
+  btn.disabled = busy;
+  btn.textContent = busy ? "Isolating…" : "Isolate";
+}
+
 // diarizer picker (used when the diarize stage is rerun)
 (async () => {
   try {
@@ -120,7 +162,10 @@ function selectJob(vid) {
   state.vid = vid;
   state.loaded = {}; state.optimistic = {};
   state.segments = []; state.transcripts = {}; state.alignments = {}; state.candidates = [];
+  state.tracks.forEach((tr) => tr.audio.pause());
   state.tracks.clear();
+  state.mix = new Set();
+  player.removeAttribute("src");
   $("tracks").innerHTML = "";
   $("transcript").innerHTML = "";
   $("hits").innerHTML = "";
@@ -156,6 +201,7 @@ async function poll() {
   renderTracks();
   await loadManifests();
   renderDetectors();
+  renderSepStatus();
   renderEmptyStates();
 }
 
@@ -232,8 +278,21 @@ function spkColor(spk) {
   return state.spkColor[spk];
 }
 
+function laneInfo(name) {
+  // friendly labels + lane accent colors, Meta-editor style
+  if (name === "original") return { label: "Original sound", color: "#3ecf8e" };
+  if (name === "denoised") return { label: "Denoised (demucs)", color: "#4da3ff" };
+  let m = name.match(/^sam_(.+)_target$/);
+  if (m) return { label: `Isolated: ${m[1].replace(/_/g, " ")}`, color: "#ff7ab0" };
+  m = name.match(/^sam_(.+)_residual$/);
+  if (m) return { label: `Without: ${m[1].replace(/_/g, " ")}`, color: "#7fd1d8" };
+  if (name.startsWith("SPEAKER_"))
+    return { label: name.replace("SPEAKER_", "S"), color: spkColor(name) };
+  return { label: name, color: "#8595a5" };
+}
+
 function renderTracks() {
-  ["listenSec", "transcriptSec", "tagsSec"].forEach((s) => $(s).classList.remove("hidden"));
+  ["listenSec", "sepSec", "transcriptSec", "tagsSec"].forEach((s) => $(s).classList.remove("hidden"));
   const holder = $("tracks");
   const sources = state.job.sources || [];
   if (!sources.length) {
@@ -244,64 +303,108 @@ function renderTracks() {
   if (holder.querySelector("p")) holder.innerHTML = "";
   sources.forEach((s) => {
     if (state.tracks.has(s.name)) return;
+    const info = laneInfo(s.name);
     const row = document.createElement("div");
-    row.className = "track" + (s.name === state.audible ? " audible" : "");
+    row.className = "track";
     const label = document.createElement("div");
     label.className = "tlabel";
-    const isSpk = s.name.startsWith("SPEAKER_");
     label.innerHTML =
-      (isSpk ? `<span class="dot" style="background:${spkColor(s.name)}"></span>` : "") +
-      s.name.replace("SPEAKER_", "S");
-    label.title = "click to make this the audible version (position kept)";
-    label.onclick = () => makeAudible(s.name);
+      `<button class="mute" title="toggle this lane in the mix">🔇</button>` +
+      `<span class="lname" style="color:${info.color}">${info.label}</span>`;
+    label.querySelector(".mute").onclick = (ev) => {
+      ev.stopPropagation();
+      toggleLane(s.name);
+    };
     const canvas = document.createElement("canvas");
     canvas.addEventListener("click", (ev) => {
       const tr = state.tracks.get(s.name);
       if (!tr?.peaks) return;
-      // clicking a lane = "I want to hear THIS track from THIS point"
+      // click a lane = solo it and play from that point
       const t = (ev.offsetX / canvas.clientWidth) * tr.peaks.duration;
       state.playStopAt = null;
-      makeAudible(s.name, t);
-      player.play().catch(() => {});
+      soloLane(s.name, t);
     });
     row.append(label, canvas);
     holder.appendChild(row);
-    const tr = { path: s.path, peaks: null, canvas, row };
+    const audio = new Audio(s.path);
+    audio.preload = "metadata";
+    const tr = { path: s.path, peaks: null, canvas, row, audio };
     state.tracks.set(s.name, tr);
     fetch(`/api/jobs/${state.vid}/peaks/${s.name}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => { tr.peaks = p; drawAll(); })
       .catch(() => {});
   });
-  if (!state.tracks.get(state.audible)) makeAudible(sources[0].name);
-  else if (!player.src) makeAudible(state.audible);
+  // transport clock: muted original drives scrubber/duration/events
+  const first = sources[0];
+  if (!player.src) { player.src = first.path; player.load(); }
+  if (!state.mix.size || ![...state.mix].some((n) => state.tracks.has(n)))
+    setMix(new Set([first.name]));
+  else refreshLaneStyles();
 }
 
-function makeAudible(name, seekTo) {
-  const tr = state.tracks.get(name);
-  if (!tr) return;
-  const t = seekTo != null ? seekTo : (player.currentTime || 0);
+/* ---- lane mixing: the muted transport <audio> is the clock; every unmuted
+   lane's own Audio element shadows it (play/pause/seek + drift correction) ---- */
+
+function setMix(names) {
+  state.mix = names;
   const wasPlaying = !player.paused;
-  const changed = state.audible !== name || !player.src.endsWith(tr.path);
-  state.audible = name;
-  if (changed) {
-    player.src = tr.path;
-    // seeking before metadata loads is unreliable — apply it on loadedmetadata
-    player.addEventListener("loadedmetadata", () => {
-      player.currentTime = t;
-      if (wasPlaying) player.play().catch(() => {});
-    }, { once: true });
-    player.load();
-  } else {
-    player.currentTime = t;
-  }
-  state.tracks.forEach((v, k) => v.row.classList.toggle("audible", k === name));
-  $("audibleLabel").textContent = name.replace("SPEAKER_", "S") + " 🔊";
+  const t = player.currentTime || 0;
+  state.tracks.forEach((tr, name) => {
+    const on = names.has(name);
+    if (!on) tr.audio.pause();
+    else {
+      tr.audio.currentTime = t;
+      if (wasPlaying) tr.audio.play().catch(() => {});
+    }
+  });
+  refreshLaneStyles();
+}
+
+function toggleLane(name) {
+  const next = new Set(state.mix);
+  if (next.has(name)) {
+    if (next.size === 1) return;           // keep at least one lane audible
+    next.delete(name);
+  } else next.add(name);
+  setMix(next);
+}
+
+function soloLane(name, seekTo) {
+  setMix(new Set([name]));
+  if (seekTo != null) player.currentTime = seekTo;
+  player.play().catch(() => {});
+}
+
+function refreshLaneStyles() {
+  const labels = [];
+  state.tracks.forEach((tr, name) => {
+    const on = state.mix.has(name);
+    tr.row.classList.toggle("audible", on);
+    const btn = tr.row.querySelector(".mute");
+    if (btn) btn.textContent = on ? "🔊" : "🔇";
+    if (on) labels.push(laneInfo(name).label);
+  });
+  $("audibleLabel").textContent = labels.join(" + ") || "–";
 }
 
 const player = $("player");
+player.muted = true;   // silent clock — audible sound comes from lane audios
+
+function eachLive(fn) {
+  state.mix.forEach((n) => { const tr = state.tracks.get(n); if (tr) fn(tr.audio); });
+}
+player.addEventListener("play", () =>
+  eachLive((a) => { a.currentTime = player.currentTime; a.play().catch(() => {}); }));
+player.addEventListener("pause", () => eachLive((a) => a.pause()));
+player.addEventListener("seeked", () => eachLive((a) => { a.currentTime = player.currentTime; }));
+player.addEventListener("ratechange", () => eachLive((a) => { a.playbackRate = player.playbackRate; }));
 player.addEventListener("timeupdate", () => {
   drawAll();
+  eachLive((a) => {                        // drift correction
+    if (Math.abs(a.currentTime - player.currentTime) > 0.1)
+      a.currentTime = player.currentTime;
+  });
   if (state.playStopAt != null && player.currentTime >= state.playStopAt) {
     player.pause();
     state.playStopAt = null;
@@ -327,8 +430,7 @@ function drawTrack(tr, name, segById) {
   }
   const bins = tr.peaks.bins;
   const mid = H / 2, bw = W / bins.length;
-  const isSpk = name.startsWith("SPEAKER_");
-  ctx.fillStyle = isSpk ? spkColor(name) + "99" : "#3a4a5c";
+  ctx.fillStyle = name === "original" ? "#3a4a5c" : laneInfo(name).color + "99";
   bins.forEach(([mn, mx], i) => {
     const y0 = mid + mn * mid * 0.92, y1 = mid + mx * mid * 0.92;
     ctx.fillRect(i * bw, Math.min(y0, y1), Math.max(1, bw * 0.8), Math.abs(y1 - y0) || 1);

@@ -24,6 +24,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .intervals import merge_close, subtract_intervals
+
 WINDOW_S = 10.0
 XFADE_S = 0.02
 PAD_S = 0.4           # dilation of other-speaker turns (boundary bleed)
@@ -68,7 +70,6 @@ def acoustic_overlaps(wav: Path, device: str = "cpu") -> list[tuple]:
     """Frame-level ≥2-speakers regions from pyannote segmentation-3.0 —
     independent of turn clustering, so short backchannels are caught."""
     global _seg_inference
-    from .intervals import merge_close
     if _seg_inference is None:
         import torch
         from huggingface_hub import get_token
@@ -102,7 +103,6 @@ def acoustic_overlaps(wav: Path, device: str = "cpu") -> list[tuple]:
 
 def suspect_regions(job_dir: Path, speaker: str, report) -> tuple:
     """tier1 ∪ tier2 overlap regions involving the target speaker."""
-    from .intervals import merge_close
     rows = [json.loads(l) for l in
             (job_dir / "manifests" / "speakers.jsonl").read_text().splitlines() if l.strip()]
     turns = next((r["turns"] for r in rows if r["speaker"] == speaker), None)
@@ -174,7 +174,6 @@ def speaker_centroid(audio16: np.ndarray, my_turns, others) -> np.ndarray:
     Each snippet is CAPPED at 5s — ecapa needs a few seconds of voice, and
     embedding a multi-minute solo stretch on CPU is what once hung a build
     for 13 minutes."""
-    from .intervals import subtract_intervals
     solo = subtract_intervals(my_turns, others)
     solo = [s for s in solo if s[1] - s[0] >= 1.0][:8]
     if not solo:

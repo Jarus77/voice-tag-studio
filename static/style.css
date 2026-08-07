@@ -155,6 +155,8 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 .seg .text { word-break: break-word; font-size: 14.5px; }
 .w { cursor: pointer; border-radius: 3px; }
 .w:hover { background: #23405c; }
+.w .wt { font: 9px var(--mono); color: var(--dim); vertical-align: sub; margin-left: 1px; }
+.w:hover .wt { color: var(--acc); }
 .chip {
   display: inline-block; padding: 0 8px; margin: 0 3px; border-radius: 999px;
   font: 11px var(--mono); border: 1px solid var(--tag); color: var(--tag);

@@ -83,6 +83,8 @@ $("jobPicker").addEventListener("change", (ev) => {
   if (ev.target.value) selectJob(ev.target.value);
 });
 
+$("showWordTimes").addEventListener("change", () => renderTranscript());
+
 $("uploadBtn").addEventListener("click", () => $("fileInput").click());
 $("fileInput").addEventListener("change", async (ev) => {
   const f = ev.target.files[0];
@@ -657,11 +659,18 @@ function renderTranscript() {
     const cands = candBySeg[seg.seg_id] || [];
 
     if (al && al.words && al.words.length) {
+      const showTimes = $("showWordTimes").checked;
       al.words.forEach((w) => {
         const span = document.createElement("span");
         span.className = "w";
-        span.textContent = w.w + " ";
-        span.onclick = (ev) => { ev.stopPropagation(); seekPlay(seg.start + w.start); };
+        const abs = seg.start + w.start;
+        span.innerHTML = w.w.replace(/&/g, "&amp;").replace(/</g, "&lt;") +
+          (showTimes ? `<sub class="wt">${abs.toFixed(2)}</sub>` : "") + " ";
+        // MMS forced-alignment timing, ~10ms precision
+        span.title = `${abs.toFixed(2)}s → ${(seg.start + w.end).toFixed(2)}s ` +
+          `(${(w.end - w.start).toFixed(2)}s) · segment-relative ` +
+          `${w.start.toFixed(2)}–${w.end.toFixed(2)}`;
+        span.onclick = (ev) => { ev.stopPropagation(); seekPlay(abs); };
         text.appendChild(span);
         cands.forEach((c) => {
           if (c.position_s != null && c.position_s >= w.start && c.position_s <= w.end)

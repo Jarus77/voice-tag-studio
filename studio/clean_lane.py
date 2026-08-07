@@ -150,8 +150,20 @@ def _separate_window_sam(job_dir, speaker, a, b, model, reranking):
     return _decode_16k(out["target"])
 
 
-def _separate_window_sepformer(audio16, a, b, centroid):
-    """Blind 2-speaker separation + embedding-based stream assignment."""
+def _spans_audio(x: np.ndarray, spans_rel: list[tuple]) -> np.ndarray | None:
+    """Concatenate the given (window-relative) spans of x; None if <0.5s."""
+    parts = [x[int(s * 16000):int(e * 16000)] for s, e in spans_rel]
+    parts = [p for p in parts if len(p)]
+    if not parts:
+        return None
+    cat = np.concatenate(parts).astype(np.float32)
+    return cat if len(cat) >= 8000 else None
+
+
+def _separate_window_sepformer(audio16, a, b, centroid, my_spans_rel):
+    """Blind 2-speaker separation; assign streams by embedding similarity
+    measured ONLY on the target's turn spans (whole-window embeddings are
+    silence-polluted in sparse windows)."""
     import torch
     sep = _get_sepformer()
     i0, i1 = int(a * 16000), min(len(audio16), int(b * 16000))
@@ -161,8 +173,12 @@ def _separate_window_sepformer(audio16, a, b, centroid):
     est = est[0].cpu().numpy()
     est = est / (np.abs(est).max(axis=0, keepdims=True) + 1e-9) \
         * (np.abs(audio16[i0:i1]).max() + 1e-9)
-    sims = [float(np.dot(_embed(est[:, k].astype(np.float32)), centroid))
-            for k in range(est.shape[1])]
+    sims = []
+    for k in range(est.shape[1]):
+        x = _spans_audio(est[:, k], my_spans_rel)
+        if x is None:
+            x = est[:, k].astype(np.float32)
+        sims.append(float(np.dot(_embed(x), centroid)))
     return est[:, int(np.argmax(sims))].astype(np.float32), max(sims)
 
 
@@ -184,8 +200,15 @@ def speaker_centroid(audio16: np.ndarray, my_turns, others) -> np.ndarray:
     return c / (np.linalg.norm(c) + 1e-9)
 
 
-def purity_of(track: np.ndarray, a: float, b: float, centroid) -> float:
-    x = track[int(a * 16000):int(b * 16000)].astype(np.float32)
+def purity_of(track: np.ndarray, a: float, b: float, centroid,
+              my_spans_rel: list[tuple]) -> float | None:
+    """Embed only the target's turn spans within [a,b] — the whole-window
+    embedding is silence-polluted when the speaker is sparse. None = too
+    little target speech in this window to score meaningfully."""
+    win = track[int(a * 16000):int(b * 16000)]
+    x = _spans_audio(win, my_spans_rel)
+    if x is None:
+        return None
     if float(np.sqrt((x ** 2).mean())) < 0.003:
         return 1.0   # silence is pure
     return float(np.dot(_embed(x), centroid))
@@ -243,28 +266,34 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     purity = {"speaker": speaker, "engine": engine, "purity_ok": PURITY_OK,
               "windows": []}
     for i, (a, b) in enumerate(windows):
+        my_rel = [(max(s, a) - a, min(e, b) - a) for s, e in my
+                  if e > a and s < b]
         if engine == "sepformer":
-            y, assign_sim = _separate_window_sepformer(audio, a, b, centroid)
+            y, assign_sim = _separate_window_sepformer(audio, a, b, centroid, my_rel)
         else:
             y = _separate_window_sam(job_dir, speaker, a, b, model, reranking)
             assign_sim = None
         i0, i1 = int(a * 16000), min(len(track), int(b * 16000))
         _paste(track, y, i0, i1)
-        p = purity_of(track, a, b, centroid)
+        p = purity_of(track, a, b, centroid, my_rel)
         purity["windows"].append({
             "start": round(a, 1), "end": round(b, 1),
-            "purity": round(p, 3), "pass": bool(p >= PURITY_OK),
+            "purity": None if p is None else round(p, 3),
+            "pass": None if p is None else bool(p >= PURITY_OK),
+            "sparse": p is None,
             **({"assign_sim": round(assign_sim, 3)} if assign_sim is not None else {}),
         })
-        report(f"{engine} window {i + 1}/{len(windows)} "
-               f"({a:.0f}-{b:.0f}s, purity {p:.2f})",
+        report(f"{engine} window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s, "
+               f"purity {'n/a (sparse)' if p is None else f'{p:.2f}'})",
                0.08 + 0.88 * (i + 1) / len(windows))
 
     sf.write(dest, track, 16000, subtype="PCM_16")
     (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
     n_pass = sum(1 for w in purity["windows"] if w["pass"])
+    n_scored = sum(1 for w in purity["windows"] if w["pass"] is not None)
     (job_dir / "manifests" / f"clean_purity_{slug}.json").write_text(
         json.dumps(purity, indent=1))
-    report(f"clean lane ready ({engine}): {n_pass}/{len(windows)} windows pass "
-           f"purity ≥{PURITY_OK}", 1.0)
+    report(f"clean lane ready ({engine}): {n_pass}/{n_scored} scored windows "
+           f"pass purity ≥{PURITY_OK} "
+           f"({len(windows) - n_scored} too sparse to score)", 1.0)
     return [name]

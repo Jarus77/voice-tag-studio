@@ -261,11 +261,12 @@ def run_detect(vid: str, body: DetectReq) -> dict:
 # ---------------- SAM-Audio separation ----------------
 
 class SeparateReq(BaseModel):
-    prompt: str
+    prompt: str = "speech"
     start: float
     dur: float = 10.0
     model: str = "facebook/sam-audio-base"
     reranking: int = 1
+    speaker: str | None = None   # set -> diarization-span prompting (issue #5)
 
 
 @app.post("/api/jobs/{vid}/separate")
@@ -274,14 +275,17 @@ def run_separate(vid: str, body: SeparateReq) -> dict:
     job_dir = JOBS_DIR / vid
     if not (job_dir / "audio" / "original.wav").exists():
         raise HTTPException(409, "run ingest first")
+    if body.speaker and not (job_dir / "manifests" / "speakers.jsonl").exists():
+        raise HTTPException(409, "run diarize first for speaker isolation")
     if not body.prompt.strip():
         raise HTTPException(400, "prompt required")
 
-    p, s, d, m, rr = (body.prompt.strip(), float(body.start), float(body.dur),
-                      body.model, int(body.reranking))
+    p, s, d, m, rr, spk = (body.prompt.strip(), float(body.start),
+                           float(body.dur), body.model, int(body.reranking),
+                           body.speaker)
 
     def fn(dir_: Path, report) -> None:
-        run_sam(dir_, report, p, s, d, model=m, reranking=rr)
+        run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)
 
     store.enqueue_detect(vid, "separate", fn)
     return {"queued": True}

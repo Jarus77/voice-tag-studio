@@ -74,7 +74,11 @@ class Separator:
     @modal.method()
     def separate(self, wav_bytes: bytes, description: str,
                  model_name: str = "facebook/sam-audio-base",
-                 reranking: int = 1, predict_spans: bool = False) -> dict:
+                 reranking: int = 1, predict_spans: bool = False,
+                 anchors: list | None = None) -> dict:
+        """anchors: chunk-relative span prompts [(token, start_s, end_s), ...]
+        with token "+" (target audible here) or "-" (target NOT here) —
+        the diarize->SAM recipe from sam-audio issue #5."""
         self.model, self.processor = self._get(model_name)
         import io
         import tempfile
@@ -85,8 +89,12 @@ class Separator:
         with tempfile.NamedTemporaryFile(suffix=".wav") as f:
             f.write(wav_bytes)
             f.flush()
+            kw = {}
+            if anchors:
+                kw["anchors"] = [[(str(a[0]), float(a[1]), float(a[2]))
+                                  for a in anchors]]
             batch = self.processor(
-                audios=[f.name], descriptions=[description]).to("cuda")
+                audios=[f.name], descriptions=[description], **kw).to("cuda")
             with torch.inference_mode():
                 res = self.model.separate(
                     batch, predict_spans=predict_spans,
@@ -95,13 +103,23 @@ class Separator:
         sr = self.processor.audio_sampling_rate
 
         def enc(t) -> bytes:
+            # torchaudio.save->torchcodec can't write WAV to BytesIO in this
+            # image — encode PCM16 WAV with the stdlib instead
+            import wave
+
+            import numpy as np
             if isinstance(t, (list, tuple)):   # batch-of-1 comes back as a list
                 t = t[0]
+            x = t.cpu().float().numpy()
+            if x.ndim > 1:                     # (C, T) -> mono
+                x = x.mean(axis=0)
+            pcm = (np.clip(x, -1.0, 1.0) * 32767).astype("<i2").tobytes()
             buf = io.BytesIO()
-            x = t.cpu().float()
-            if x.dim() == 1:
-                x = x[None]
-            torchaudio.save(buf, x, sr, format="wav")
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sr)
+                w.writeframes(pcm)
             return buf.getvalue()
 
         return {"target": enc(res.target), "residual": enc(res.residual), "sr": sr}

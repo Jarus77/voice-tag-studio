@@ -141,6 +141,29 @@ $("sepRun").addEventListener("click", async () => {
   poll();
 });
 
+async function isolateSpeaker(speaker) {
+  // diarize->SAM span prompting (sam-audio issue #5 recipe): "+" spans =
+  // this speaker's turns in the window, "-" = other speakers' turns
+  let start = parseFloat($("sepStart").value || "0");
+  if (!start && player.currentTime) {
+    start = Math.max(0, player.currentTime - 5);
+    $("sepStart").value = start.toFixed(1);
+  }
+  const r = await fetch(`/api/jobs/${state.vid}/separate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: "speech",
+      speaker,
+      start,
+      dur: parseFloat($("sepDur").value || "10"),
+      model: $("sepModel").value,
+      reranking: parseInt($("sepRerank").value, 10),
+    }),
+  });
+  if (!r.ok) banner("isolate speaker: " + ((await r.json()).detail || r.status));
+  poll();
+}
+
 function renderSepStatus() {
   const d = (state.job.detectors || {}).separate;
   const el = $("sepStatus");
@@ -320,13 +343,20 @@ function renderTracks() {
     row.className = "track";
     const label = document.createElement("div");
     label.className = "tlabel";
+    const isSpk = s.name.startsWith("SPEAKER_");
     label.innerHTML =
       `<button class="mute" title="toggle this lane in the mix">🔇</button>` +
-      `<span class="lname" style="color:${info.color}">${info.label}</span>`;
+      `<span class="lname" style="color:${info.color}">${info.label}</span>` +
+      (isSpk ? `<button class="samiso" title="isolate this speaker with SAM-Audio using diarization spans (window = start/dur in the Isolate panel below)">⧉</button>` : "");
     label.querySelector(".mute").onclick = (ev) => {
       ev.stopPropagation();
       toggleLane(s.name);
     };
+    if (isSpk)
+      label.querySelector(".samiso").onclick = (ev) => {
+        ev.stopPropagation();
+        isolateSpeaker(s.name);
+      };
     const canvas = document.createElement("canvas");
     canvas.addEventListener("click", (ev) => {
       const tr = state.tracks.get(s.name);

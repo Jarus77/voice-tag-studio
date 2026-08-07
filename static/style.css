@@ -123,6 +123,12 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 .tlabel .mute:hover { opacity: 1; }
 .track.audible .tlabel .mute { opacity: 1; }
 .tlabel .lname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlabel .samiso {
+  margin-left: auto; border: 1px solid var(--line); background: transparent;
+  color: var(--tag); border-radius: 5px; padding: 0 5px; font-size: 11px;
+  cursor: pointer; opacity: .6;
+}
+.tlabel .samiso:hover { opacity: 1; border-color: var(--tag); }
 .track { opacity: .55; transition: opacity .2s; }
 .track.audible { opacity: 1; }
 .track canvas { width: 100%; height: 62px; display: block; background: var(--bg); cursor: crosshair; }

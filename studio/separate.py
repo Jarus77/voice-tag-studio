@@ -25,20 +25,29 @@ REMOTE_TIMEOUT_S = 600   # a 10s window should never take 10 minutes
 
 
 def _remote_with_timeout(sep, wav_bytes, prompt, model, reranking, anchors):
-    """spawn + bounded get: a wedged Modal call (dead container, GPU capacity
-    contention) fails loudly instead of hanging the runner forever."""
-    call = sep.separate.spawn(wav_bytes, prompt, model_name=model,
-                              reranking=reranking, anchors=anchors)
-    try:
-        return call.get(timeout=REMOTE_TIMEOUT_S)
-    except TimeoutError:
+    """spawn + bounded get, with retries for transient network failures
+    (laptop Wi-Fi/VPN blips toward Modal must not kill a 20-window build)."""
+    import time
+    last = None
+    for attempt in range(4):
         try:
-            call.cancel()
-        except Exception:
-            pass
-        raise RuntimeError(
-            f"SAM call timed out after {REMOTE_TIMEOUT_S}s — Modal container "
-            "not starting (GPU capacity busy in workspace?) — retry later")
+            call = sep.separate.spawn(wav_bytes, prompt, model_name=model,
+                                      reranking=reranking, anchors=anchors)
+            return call.get(timeout=REMOTE_TIMEOUT_S)
+        except TimeoutError:
+            try:
+                call.cancel()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"SAM call timed out after {REMOTE_TIMEOUT_S}s — Modal "
+                "container not starting (GPU capacity busy?) — retry later")
+        except (ConnectionError, OSError) as e:
+            last = e
+            time.sleep(5 * (attempt + 1))   # 5/10/15s backoff
+    raise RuntimeError(f"Modal unreachable after 4 attempts "
+                       f"({type(last).__name__}: {str(last)[:120]}) — "
+                       "check network/VPN and retry")
 
 
 def _decode_16k(wav_bytes: bytes):

@@ -76,6 +76,10 @@ class JobStore:
                         st["msg"] = "interrupted (server restart)"
                     elif st.get("status") == "queued":
                         st["status"] = "pending"
+                for st in job.get("detectors", {}).values():
+                    if st.get("status") in ("running", "queued"):
+                        st["status"] = "error"
+                        st["msg"] = "interrupted (server restart)"
                 self._status[d.name] = job
                 self._refresh_done(d.name)
 

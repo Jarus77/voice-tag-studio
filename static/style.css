@@ -175,6 +175,8 @@ button.danger:hover:not(:disabled) { border-color: var(--err); background: #2b1e
 .w { cursor: pointer; border-radius: 3px; }
 .w:hover { background: #23405c; }
 .w .wt { font: 9px var(--mono); color: var(--dim); vertical-align: sub; margin-left: 1px; }
+.w.untimed { cursor: default; border-bottom: 1px dotted var(--dim); }
+.w.untimed:hover { background: transparent; }
 .w:hover .wt { color: var(--acc); }
 .chip {
   display: inline-block; padding: 0 8px; margin: 0 3px; border-radius: 999px;
@@ -224,3 +226,4 @@ button.danger:hover:not(:disabled) { border-color: var(--err); background: #2b1e
 }
 .audible-label { font: 12px var(--mono); color: var(--acc); min-width: 90px; }
 #transport audio { flex: 1; height: 36px; }
+.lg-plain { border: 1px solid var(--dim); color: var(--dim); }

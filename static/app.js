@@ -783,17 +783,39 @@ function renderTranscript() {
     text.className = "text";
     const cands = candBySeg[seg.seg_id] || [];
 
-    if (al && al.words && al.words.length) {
+    if (al && al.words && al.words.length && tr?.text) {
       const showTimes = $("showWordTimes").checked;
-      al.words.forEach((w) => {
+      // Render EVERY token of the transcript. MMS can only align letters, so
+      // digits/symbols have no timing — they must still be shown (they are
+      // real speech), just not clickable.
+      const tokens = tr.text.split(/\s+/).filter(Boolean);
+      const timed = {};
+      if (al.words[0].i !== undefined) {
+        al.words.forEach((w) => (timed[w.i] = w));
+      } else {                       // alignments written before `i` existed
+        let k = 0;
+        tokens.forEach((tok, i) => {
+          if (k < al.words.length && al.words[k].w === tok) timed[i] = al.words[k++];
+        });
+      }
+      tokens.forEach((tok, i) => {
+        const w = timed[i];
         const span = document.createElement("span");
+        const esc = tok.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        if (!w) {                    // unalignable (digits, ₹, symbols)
+          span.className = "w untimed";
+          span.innerHTML = esc + " ";
+          span.title = "no forced-alignment timing (digits and symbols can't be "
+            + "aligned) — the audio is there, only the timestamp is unknown";
+          text.appendChild(span);
+          return;
+        }
         span.className = "w";
         const abs = seg.start + w.start;
         span.dataset.a = abs;
         span.dataset.b = seg.start + w.end;
-        span.innerHTML = w.w.replace(/&/g, "&amp;").replace(/</g, "&lt;") +
+        span.innerHTML = esc +
           (showTimes ? `<sub class="wt">${abs.toFixed(2)}</sub>` : "") + " ";
-        // MMS forced-alignment timing, ~10ms precision
         span.title = `${abs.toFixed(2)}s → ${(seg.start + w.end).toFixed(2)}s ` +
           `(${(w.end - w.start).toFixed(2)}s) · segment-relative ` +
           `${w.start.toFixed(2)}–${w.end.toFixed(2)}`;

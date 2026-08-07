@@ -148,8 +148,12 @@ def run(job_dir: Path, report) -> None:
                     clipped.append("end")
             row.update({
                 "status": cls,
-                "words": [{"w": tokens[ti], "start": round(a, 3), "end": round(b, 3)}
+                # i = index into text.split() so the UI can rebuild the FULL
+                # text (digits/symbols are unalignable and would vanish)
+                "words": [{"i": ti, "w": tokens[ti],
+                           "start": round(a, 3), "end": round(b, 3)}
                           for ti, (a, b) in zip(tok_idx, spans)],
+                "n_tokens": len(tokens),
                 "islands": [[round(a, 2), round(b, 2)] for a, b in islands],
                 "aligned_frac": round(1.0 - island_s / speech_s, 3) if speech_s else None,
                 "max_island_s": round(mx, 2),

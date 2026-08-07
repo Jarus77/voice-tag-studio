@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=27">
+<link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 
@@ -72,6 +72,7 @@
     <span><b class="lg-resc">rescued 12%</b> = that share of the clip is overlap audio recovered by SepFormer; the rest is untouched original (hover for seconds)</span>
     <span><b class="lg-imp">impure 0.54</b> = voice match to this speaker's own voiceprint is below 0.55 — listen: crosstalk, wrong speaker, or a false alarm</span>
     <span><b class="lg-imp">✂ start/end</b> = the first/last word runs into the clip edge — probably cut in half</span>
+    <span><b class="lg-plain">digits_uncertain</b> = the clip has unaligned audio, but the text contains digits (87,000 · 10-15%) which forced alignment can't time — usually harmless. Dotted-underlined words are those untimed tokens.</span>
   </div>
   <div id="transcriptEmpty" class="empty"></div>
   <div id="transcript"></div>
@@ -99,6 +100,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=28"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>

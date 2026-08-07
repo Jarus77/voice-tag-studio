@@ -226,14 +226,24 @@ function renderStepper() {
     const step = document.createElement("div");
     step.className = `step ${status}`;
     const pct = status === "running" ? Math.round((st.progress || 0) * 100) : null;
+    // the segment step announces WHICH audio it will cut from, per speaker
+    let idle = STAGE_EXPLAIN[name] || "";
+    if (name === "segment" && state.job?.stages?.diarize?.status === "done") {
+      const have = cleanSpeakers();
+      const spks = (state.job.sources || [])
+        .filter((s) => s.name.startsWith("SPEAKER_")).map((s) => s.name);
+      if (spks.length)
+        idle = "cuts " + spks.map((s) =>
+          `${s.replace("SPEAKER_", "S")}:${have.has(s) ? "clean" : "orig"}`).join(" ");
+    }
     step.innerHTML =
       `<span class="icon">${ICONS[status] ?? "○"}</span>` +
       `<span><span class="name">${name}</span>` +
       `<span class="sub">${status === "running" ? (st.msg || pct + "%")
         : status === "queued" ? "queued"
         : status === "error" ? "failed — click to retry"
-        : status === "pending" ? "▶ click to run"
-        : STAGE_EXPLAIN[name] || ""}</span></span>` +
+        : status === "pending" ? `▶ ${idle || "click to run"}`
+        : idle}</span></span>` +
       (status === "running" ? `<span class="stepbar"><i style="width:${pct}%"></i></span>` : "");
     step.title = st.msg || `${name}: ${status}` + " (click to rerun)";
     step.onclick = () => rerunStage(name, status);
@@ -289,8 +299,10 @@ function laneInfo(name) {
   // friendly labels + lane accent colors, Meta-editor style
   if (name === "original") return { label: "Original sound", color: "#3ecf8e" };
   if (name === "denoised") return { label: "Denoised (demucs)", color: "#4da3ff" };
-  let m = name.match(/^sam_(.+)_clean(?:_(\w+))?$/);
-  if (m) return { label: `Clean: ${m[1].replace(/_/g, " ")}${m[2] ? " · " + m[2] : ""}`, color: "#ffd166" };
+  let m = name.match(/^sam_speaker_(\d+)_clean(?:_(\w+))?$/);
+  if (m) return { label: `Clean S${m[1]}`, color: "#ffd166" };
+  m = name.match(/^sam_(.+)_clean(?:_(\w+))?$/);
+  if (m) return { label: `Clean ${m[1].replace(/_/g, " ")}`, color: "#ffd166" };
   if (name.startsWith("SPEAKER_"))
     return { label: name.replace("SPEAKER_", "S"), color: spkColor(name) };
   return { label: name, color: "#8595a5" };
@@ -320,6 +332,7 @@ function renderTracks() {
       (isSpk
         ? `<button class="samiso" title="build a clean full-length lane for this speaker: original where they speak alone, SepFormer separation at overlap windows, silence elsewhere">clean</button>`
         : "");
+    if (isSpk) row.dataset.speaker = s.name;
     label.querySelector(".mute").onclick = (ev) => {
       ev.stopPropagation();
       toggleLane(s.name);
@@ -356,6 +369,32 @@ function renderTracks() {
   if (!state.mix.size || ![...state.mix].some((n) => state.tracks.has(n)))
     setMix(new Set([first.name]));
   else refreshLaneStyles();
+  markCleanLanes();
+}
+
+/** which speakers already have a clean lane (derived from the lane names) */
+function cleanSpeakers() {
+  const out = new Set();
+  (state.job.sources || []).forEach((s) => {
+    const m = s.name.match(/^sam_(speaker_\d+)_clean/);
+    if (m) out.add(m[1].toUpperCase());
+  });
+  return out;
+}
+
+function markCleanLanes() {
+  const have = cleanSpeakers();
+  state.tracks.forEach((tr, name) => {
+    const btn = tr.row.querySelector(".samiso");
+    if (!btn) return;
+    const built = have.has(name);
+    btn.textContent = built ? "clean ✓" : "clean";
+    btn.classList.toggle("built", built);
+    btn.title = built
+      ? "clean lane already built — click to rebuild (segment will cut from it)"
+      : "build a clean lane: original where this speaker is alone, SepFormer "
+        + "at overlap windows — segment will then keep the rescued overlap";
+  });
 }
 
 function renderOverlaps() {
@@ -367,7 +406,8 @@ function renderOverlaps() {
   el.dataset.n = ov.length;
   el.innerHTML =
     `<span class="hint">⚠ ${ov.length} overlap region${ov.length > 1 ? "s" : ""} ` +
-    `(both speakers at once — dropped from the dataset; click to jump, then ⧉ a speaker to rescue via SAM):</span> ` +
+    `(both speakers at once — dropped unless rescued; click to jump, then ` +
+    `<b>clean</b> on a speaker lane to rescue them):</span> ` +
     ov.slice(0, 60).map(([a, b]) =>
       `<button class="ovchip" data-a="${a}" data-b="${b}">${fmtT(a)}·${(b - a).toFixed(1)}s</button>`
     ).join("") + (ov.length > 60 ? ` <span class="hint">+${ov.length - 60} more</span>` : "");

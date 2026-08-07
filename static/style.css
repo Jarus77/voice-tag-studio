@@ -138,6 +138,8 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 .tlabel .samiso:first-of-type { margin-left: auto; }
 .tlabel .samiso:hover:not(:disabled) { opacity: 1; border-color: var(--tag); }
 .tlabel .samiso:disabled { opacity: .25; cursor: default; }
+.tlabel .samiso.built { color: var(--ok); border-color: #235c44; opacity: 1; }
+.step .sub { font-variant-numeric: tabular-nums; }
 .track { opacity: .55; transition: opacity .2s; }
 .track.audible { opacity: 1; }
 .track canvas { width: 100%; height: 62px; display: block; background: var(--bg); cursor: crosshair; }

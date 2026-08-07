@@ -215,8 +215,8 @@ def rerun_stage(vid: str, stage: str, force: bool = False,
     if job is None:
         raise HTTPException(404, "no such job")
     if stage == "asr" and engine:
-        if engine not in ("srota", "sarvam"):
-            raise HTTPException(400, "engine must be srota or sarvam")
+        if engine not in ("srota", "sarvam", "gemini"):
+            raise HTTPException(400, "engine must be srota, sarvam or gemini")
         store.set_field(vid, "asr_engine", engine)
     if stage == "diarize" and engine:
         if engine not in DIARIZERS:

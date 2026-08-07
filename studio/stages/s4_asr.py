@@ -99,16 +99,52 @@ def _run_sarvam_all(job_dir: Path, segments: list[dict], report) -> None:
     report(f"done, {n_err} errors", 1.0)
 
 
+def _run_gemini_all(job_dir: Path, segments: list[dict], report) -> None:
+    """Full-corpus Gemini verbatim transcription — best filler fidelity
+    (the whole reason it's the default: Sarvam strips fillers, Whisper
+    normalizes them, and [hesitates] depends on them)."""
+    import time
+    load_env()
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise RuntimeError("GEMINI_API_KEY missing — add it to .env "
+                           "(or rerun with ?engine=srota)")
+    from ..asr_bakeoff import _gemini_transcribe
+    rows = []
+    for i, s in enumerate(segments):
+        r = _gemini_transcribe(job_dir / s["wav"])
+        if r.get("error"):          # one retry on transient API errors
+            time.sleep(2)
+            r = _gemini_transcribe(job_dir / s["wav"])
+        text = (r.get("text") or "").strip()
+        rows.append({
+            "seg_id": s["seg_id"],
+            "text": text,
+            "asr": "gemini:verbatim",
+            "language": "",
+            "script": script_profile(text) if text else None,
+            "error": r.get("error"),
+        })
+        if (i + 1) % 5 == 0 or i + 1 == len(segments):
+            report(f"gemini: {i + 1}/{len(segments)}", (i + 1) / len(segments))
+    write_jsonl(job_dir / "manifests" / "transcripts.jsonl", rows)
+    n_err = sum(1 for r in rows if r["error"])
+    if n_err == len(rows):
+        raise RuntimeError("every segment failed Gemini — check key/quota")
+    report(f"done, {n_err} errors", 1.0)
+
+
 def run(job_dir: Path, report) -> None:
     segments = read_jsonl(job_dir / "manifests" / "segments.jsonl")
     if not segments:
         raise RuntimeError("segments.jsonl missing — run segment first")
 
     from ..manifests import read_json
-    # default engine = sarvam (user decision 2026-08-07); srota stays available
-    # via /stages/asr?engine=srota. NOTE: sarvam drops fillers — hesitates-tag
-    # segments should escalate to Gemini verbatim once GEMINI_API_KEY exists.
-    engine = read_json(job_dir / "job.json").get("asr_engine", "sarvam")
+    # default engine = gemini verbatim (user decision 2026-08-07: fillers are
+    # non-negotiable; sarvam strips them). srota = free local fallback.
+    engine = read_json(job_dir / "job.json").get("asr_engine", "gemini")
+    if engine == "gemini":
+        _run_gemini_all(job_dir, segments, report)
+        return
     if engine == "sarvam":
         _run_sarvam_all(job_dir, segments, report)
         return

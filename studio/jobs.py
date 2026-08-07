@@ -132,6 +132,11 @@ class JobStore:
     def busy(self) -> str | None:
         return self._busy
 
+    def forget(self, vid: str) -> None:
+        """Drop a deleted job from memory (its dir is already gone)."""
+        with self._lock:
+            self._status.pop(vid, None)
+
     def activity(self) -> dict | None:
         """What the runner is doing RIGHT NOW (any job) + queue depth."""
         with self._lock:

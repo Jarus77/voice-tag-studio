@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=26">
+<link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
 
@@ -17,6 +17,7 @@
   <input id="fileInput" type="file" accept="audio/*,video/*" hidden>
   <button id="uploadBtn" title="upload a local audio file (short clips are perfect for testing)">Upload audio</button>
   <select id="jobPicker" title="switch job"></select>
+  <button id="deleteJob" class="danger" title="delete this job and all its audio, segments and manifests (irreversible)">🗑</button>
 </header>
 
 <div id="banner" class="banner hidden"></div>
@@ -98,6 +99,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=26"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>

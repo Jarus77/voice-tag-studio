@@ -146,6 +146,24 @@ def list_jobs() -> list[dict]:
     return store.list()
 
 
+@app.delete("/api/jobs/{vid}")
+def delete_job(vid: str) -> dict:
+    """Delete one job and everything it produced (audio, lanes, segments,
+    manifests). Irreversible — jobs/ is gitignored."""
+    import shutil as _sh
+    if "/" in vid or ".." in vid:
+        raise HTTPException(400, "bad job id")
+    job_dir = JOBS_DIR / vid
+    if not job_dir.exists():
+        raise HTTPException(404, "no such job")
+    if store.busy() == vid:
+        raise HTTPException(409, "this job is running — wait for it to finish")
+    size = sum(f.stat().st_size for f in job_dir.rglob("*") if f.is_file())
+    _sh.rmtree(job_dir, ignore_errors=True)
+    store.forget(vid)
+    return {"deleted": vid, "freed_mb": round(size / 1e6, 1)}
+
+
 @app.get("/api/jobs/{vid}")
 def get_job(vid: str) -> dict:
     job = store.get(vid)

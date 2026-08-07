@@ -85,6 +85,31 @@ $("jobPicker").addEventListener("change", (ev) => {
 
 $("showWordTimes").addEventListener("change", () => renderTranscript());
 
+$("deleteJob").addEventListener("click", async () => {
+  if (!state.vid) return;
+  const title = state.job?.title || state.vid;
+  if (!confirm(`Delete "${title}"?\n\nRemoves its audio, speaker lanes, clean ` +
+               `lanes, segments, transcripts and manifests. This cannot be undone.`))
+    return;
+  const btn = $("deleteJob");
+  btn.disabled = true;
+  const r = await fetch(`/api/jobs/${state.vid}`, { method: "DELETE" });
+  btn.disabled = false;
+  if (!r.ok) { banner("delete failed: " + ((await r.json()).detail || r.status)); return; }
+  const d = await r.json();
+  banner(`deleted ${d.deleted} — freed ${d.freed_mb} MB`, true);
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  state.vid = null; state.job = null;
+  state.tracks.forEach((tr) => tr.audio.pause());
+  state.tracks.clear();
+  ["tracks", "transcript", "hits", "bakeResults"].forEach((id) => ($(id).innerHTML = ""));
+  await refreshJobList();
+  const pick = $("jobPicker");
+  if (pick.options.length) selectJob(pick.options[pick.options.length - 1].value);
+  else ["listenSec", "transcriptSec", "tagsSec", "bakeoffSec"]
+    .forEach((s) => $(s).classList.add("hidden"));
+});
+
 $("uploadBtn").addEventListener("click", () => $("fileInput").click());
 $("fileInput").addEventListener("change", async (ev) => {
   const f = ev.target.files[0];

@@ -66,15 +66,20 @@ def run_sam_speaker_full(job_dir: Path, report, speaker: str,
     if not turns:
         raise RuntimeError(f"unknown speaker {speaker}")
     my = [(t["start"], t["end"]) for t in turns]
-    others = [(t["start"], t["end"]) for r in rows if r["speaker"] != speaker
-              for t in r["turns"]]
+    # Dilate other-speaker turns by 0.4s before intersecting: diarization
+    # boundaries are ~±200ms imprecise, and quick backchannels bleed into the
+    # target's turns — route those near-miss regions through SAM too, or the
+    # "clean" lane keeps them raw.
+    PAD = 0.4
+    others = [(t["start"] - PAD, t["end"] + PAD)
+              for r in rows if r["speaker"] != speaker for t in r["turns"]]
 
-    # overlaps involving THIS speaker
+    # overlaps (incl. near-misses) involving THIS speaker
     ov = []
     for a, b in my:
         for c, d in others:
             s, e = max(a, c), min(b, d)
-            if e - s >= 0.1:
+            if e - s >= 0.05:
                 ov.append((s, e))
     ov = merge_close(ov, 0.2)
 

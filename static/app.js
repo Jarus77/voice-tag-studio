@@ -141,15 +141,15 @@ $("sepRun").addEventListener("click", async () => {
   poll();
 });
 
-async function isolateSpeaker(speaker) {
-  // diarize->SAM span prompting (sam-audio issue #5 recipe): "+" spans =
-  // this speaker's turns, "-" = other speakers' turns
+async function isolateSpeaker(speaker, engineOverride) {
+  // diarize->separation span recipe: "+" spans = this speaker's turns,
+  // "-" = other speakers' turns
   let start = parseFloat($("sepStart").value || "0");
   if (!start && player.currentTime) {
     start = Math.max(0, player.currentTime - 5);
     $("sepStart").value = start.toFixed(1);
   }
-  const engine = $("sepEngine").value;
+  const engine = engineOverride || $("sepEngine").value;
   const nOvWin = new Set((state.job.overlaps || []).map(([a]) => Math.floor(a / 10))).size;
   const full = confirm(
     `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane with ` +
@@ -362,16 +362,21 @@ function renderTracks() {
     label.innerHTML =
       `<button class="mute" title="toggle this lane in the mix">🔇</button>` +
       `<span class="lname" style="color:${info.color}">${info.label}</span>` +
-      (isSpk ? `<button class="samiso" title="isolate this speaker with SAM-Audio using diarization spans (window = start/dur in the Isolate panel below)">⧉</button>` : "");
+      (isSpk
+        ? `<button class="samiso" data-eng="sepformer" title="build clean lane with SepFormer (local, free)">SF</button>` +
+          `<button class="samiso" data-eng="sam" title="build clean lane with SAM-Audio (Modal GPU)">SAM</button>`
+        : "");
     label.querySelector(".mute").onclick = (ev) => {
       ev.stopPropagation();
       toggleLane(s.name);
     };
     if (isSpk)
-      label.querySelector(".samiso").onclick = (ev) => {
-        ev.stopPropagation();
-        isolateSpeaker(s.name);
-      };
+      label.querySelectorAll(".samiso").forEach((btn) => {
+        btn.onclick = (ev) => {
+          ev.stopPropagation();
+          isolateSpeaker(s.name, btn.dataset.eng);
+        };
+      });
     const canvas = document.createElement("canvas");
     canvas.addEventListener("click", (ev) => {
       const tr = state.tracks.get(s.name);

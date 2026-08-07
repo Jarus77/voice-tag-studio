@@ -124,12 +124,18 @@ def get_job(vid: str) -> dict:
     if meta.get("title") and not job.get("title"):
         store.set_field(vid, "title", meta["title"])
         job["title"] = meta["title"]
-    # audio sources for the Listen section
+    # audio sources for the Listen section: original/denoised first, then any
+    # extra full-length tracks dropped in audio/ (e.g. sam_* separations),
+    # then per-speaker masked tracks
     sources = []
-    if (job_dir / "audio" / "original.wav").exists():
-        sources.append({"name": "original", "path": f"/files/{vid}/audio/original.wav"})
-    if (job_dir / "audio" / "denoised.wav").exists():
-        sources.append({"name": "denoised", "path": f"/files/{vid}/audio/denoised.wav"})
+    seen = set()
+    for name in ["original", "denoised"]:
+        if (job_dir / "audio" / f"{name}.wav").exists():
+            sources.append({"name": name, "path": f"/files/{vid}/audio/{name}.wav"})
+            seen.add(name)
+    for wav in sorted((job_dir / "audio").glob("*.wav")):
+        if wav.stem not in seen:
+            sources.append({"name": wav.stem, "path": f"/files/{vid}/audio/{wav.name}"})
     for spk in sorted((job_dir / "audio" / "speakers").glob("*.wav")):
         sources.append({"name": spk.stem,
                         "path": f"/files/{vid}/audio/speakers/{spk.name}"})
@@ -178,11 +184,11 @@ def get_manifest(vid: str, name: str) -> JSONResponse:
 def get_peaks(vid: str, name: str) -> JSONResponse:
     from studio.audio import peaks_cached
     job_dir = JOBS_DIR / vid
-    candidates = {
-        "original": job_dir / "audio" / "original.wav",
-        "denoised": job_dir / "audio" / "denoised.wav",
-    }
-    wav = candidates.get(name, job_dir / "audio" / "speakers" / f"{name}.wav")
+    if "/" in name or ".." in name:
+        raise HTTPException(400, "bad name")
+    wav = job_dir / "audio" / f"{name}.wav"
+    if not wav.exists():
+        wav = job_dir / "audio" / "speakers" / f"{name}.wav"
     if not wav.exists():
         raise HTTPException(404, f"no audio source {name}")
     return JSONResponse(peaks_cached(wav, job_dir / "peaks"))

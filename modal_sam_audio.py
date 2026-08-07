@@ -94,9 +94,11 @@ class Separator:
 
         sr = self.processor.audio_sampling_rate
 
-        def enc(t: "torch.Tensor") -> bytes:
+        def enc(t) -> bytes:
+            if isinstance(t, (list, tuple)):   # batch-of-1 comes back as a list
+                t = t[0]
             buf = io.BytesIO()
-            x = t.cpu()
+            x = t.cpu().float()
             if x.dim() == 1:
                 x = x[None]
             torchaudio.save(buf, x, sr, format="wav")

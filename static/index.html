@@ -29,6 +29,8 @@
     <span id="jobTitle" class="hint"></span>
     <span style="margin-left:auto" class="hint">diarizer:</span>
     <select id="diarPicker" title="model used when (re)running the diarize stage"></select>
+    <label class="hint" title="crosstalk guard: other speakers' turns are widened by this before being cut out. Bigger = safer but eats short turns (a turn must exceed 2s + 2×guard to survive)">guard
+      <input id="guardInput" type="number" min="0" max="1" step="0.05" value="0.15" style="width:64px"> s</label>
     <button id="runRemaining" title="queue every not-yet-done stage, in order">Run remaining ▸</button>
   </div>
   <div id="stepper" class="stepper"></div>
@@ -127,6 +129,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

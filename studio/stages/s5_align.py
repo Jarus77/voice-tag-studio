@@ -136,6 +136,16 @@ def run(job_dir: Path, report) -> None:
                 cls = "filler_suspect"
             else:
                 cls = "major_gap"
+            # clipped-word check: a first/last word whose alignment runs into
+            # the clip edge was very likely cut in half by segmentation
+            # (split point, crosstalk subtraction, or a turn-boundary error)
+            EDGE = 0.05
+            clipped = []
+            if spans:
+                if spans[0][0] <= EDGE:
+                    clipped.append("start")
+                if spans[-1][1] >= seg["dur"] - EDGE:
+                    clipped.append("end")
             row.update({
                 "status": cls,
                 "words": [{"w": tokens[ti], "start": round(a, 3), "end": round(b, 3)}
@@ -143,6 +153,7 @@ def run(job_dir: Path, report) -> None:
                 "islands": [[round(a, 2), round(b, 2)] for a, b in islands],
                 "aligned_frac": round(1.0 - island_s / speech_s, 3) if speech_s else None,
                 "max_island_s": round(mx, 2),
+                "clipped": clipped,   # [] | ["start"] | ["end"] | both
             })
         except Exception as e:
             row.update({"status": "align_error",
@@ -152,3 +163,5 @@ def run(job_dir: Path, report) -> None:
             report(f"aligned {i + 1}/{len(todo)}", 0.05 + 0.93 * (i + 1) / len(todo))
 
     write_jsonl(job_dir / "manifests" / "alignments.jsonl", rows)
+    n_clip = sum(1 for r in rows if r.get("clipped"))
+    report(f"aligned {len(rows)} · {n_clip} with a clipped edge word", 1.0)

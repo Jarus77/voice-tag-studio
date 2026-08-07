@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 
 from ..audio import load_audio
@@ -67,10 +68,17 @@ def _no_cut_zones(job_dir: Path) -> list[tuple]:
 
 
 def run(job_dir: Path, report) -> None:
+    from ..manifests import read_json
+
     vid = job_dir.name
     speakers = read_jsonl(job_dir / "manifests" / "speakers.jsonl")
     if not speakers:
         raise RuntimeError("speakers.jsonl missing — run diarize first")
+
+    # crosstalk guard is tunable per job (UI field) — bigger = safer but eats
+    # into short turns; 0.15s ~ one sigma of pyannote's boundary error
+    guard = float(read_json(job_dir / "job.json").get("crosstalk_guard")
+                  or CROSSTALK_GUARD_S)
 
     zones = _no_cut_zones(job_dir)
     if zones:
@@ -85,7 +93,7 @@ def run(job_dir: Path, report) -> None:
     seg_dir = job_dir / "segments"
     for si, spk_row in enumerate(speakers):
         spk = spk_row["speaker"]
-        others = [(s - CROSSTALK_GUARD_S, e + CROSSTALK_GUARD_S)
+        others = [(s - guard, e + guard)
                   for o, ts in all_turns.items() if o != spk for s, e in ts]
 
         # If a clean lane exists for this speaker, cut from it and KEEP the
@@ -144,5 +152,44 @@ def run(job_dir: Path, report) -> None:
         report(f"{spk}: {n_spk} segments from {source}"
                + (f" ({n_sep} contain rescued overlap)" if n_sep else ""),
                0.05 + 0.9 * (si + 1) / len(speakers))
+
+    # ---- purity gate: verify each clip acoustically against its speaker's
+    # own voiceprint. A blunt guard band can't tell contaminated clips from
+    # clean ones; an embedding can. Scores are RECORDED, not enforced —
+    # calibrate the threshold by ear before trusting it (voice-project rule).
+    try:
+        from ..clean_lane import PURITY_OK, _embed, speaker_centroid
+        report("purity gate: speaker centroids", 0.95)
+        cents = {}
+        for spk_row in speakers:
+            spk = spk_row["speaker"]
+            my = [(t["start"], t["end"]) for t in spk_row["turns"]]
+            others = [(t["start"], t["end"]) for r in speakers
+                      if r["speaker"] != spk for t in r["turns"]]
+            try:
+                cents[spk] = speaker_centroid(original, my, others)
+            except Exception:
+                cents[spk] = None
+        import soundfile as sf
+        for i, r in enumerate(rows):
+            c = cents.get(r["speaker"])
+            if c is None:
+                continue
+            try:
+                x, _ = sf.read(job_dir / r["wav"], dtype="float32")
+                p = float(np.dot(_embed(x[:160000]), c))
+                r["purity"] = round(p, 3)
+                r["purity_pass"] = bool(p >= PURITY_OK)
+            except Exception:
+                pass
+            if (i + 1) % 25 == 0 or i + 1 == len(rows):
+                report(f"purity {i + 1}/{len(rows)}", 0.95 + 0.04 * (i + 1) / len(rows))
+        scored = [r for r in rows if "purity" in r]
+        if scored:
+            n_bad = sum(1 for r in scored if not r["purity_pass"])
+            report(f"purity: {len(scored) - n_bad}/{len(scored)} clips clean "
+                   f"(guard {guard:.2f}s)", 0.99)
+    except Exception as e:      # never let verification block segmentation
+        report(f"purity gate skipped: {type(e).__name__}", 0.99)
 
     write_jsonl(job_dir / "manifests" / "segments.jsonl", rows)

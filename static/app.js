@@ -313,6 +313,7 @@ async function rerunStage(name, status) {
   let q = `force=true`;
   if (name === "diarize" && $("diarPicker").value)
     q += `&engine=${encodeURIComponent($("diarPicker").value)}`;
+  if (name === "segment") q += `&guard=${parseFloat($("guardInput").value || "0.15")}`;
   await fetch(`/api/jobs/${state.vid}/stages/${name}?${q}`, { method: "POST" });
   poll();
 }
@@ -618,8 +619,14 @@ function renderEmptyStates() {
   $("transcriptEmpty").innerHTML = state.segments.length
     ? (Object.keys(state.transcripts).length ? "" : waitTxt("asr"))
     : waitTxt("segment");
+  const nImpure = state.segments.filter((s) => s.purity != null && !s.purity_pass).length;
+  const nClip = Object.values(state.alignments).filter((a) => a.clipped?.length).length;
+  const nResc = state.segments.filter((s) => s.separated).length;
   $("transcriptBadge").textContent = state.segments.length
     ? `${state.segments.length} segments · ${new Set(state.segments.map((s) => s.speaker)).size} speakers`
+      + (nResc ? ` · ${nResc} rescued` : "")
+      + (nImpure ? ` · ${nImpure} impure` : "")
+      + (nClip ? ` · ${nClip} clipped` : "")
     : "";
   $("hitsEmpty").innerHTML = state.candidates.length ? "" :
     (state.segments.length
@@ -708,6 +715,22 @@ function renderTranscript() {
         `purity-gated; flagged for dataset filtering`;
       text.appendChild(chip);
     }
+    if (seg.purity != null && !seg.purity_pass) {
+      const chip = document.createElement("span");
+      chip.className = "chip over";
+      chip.textContent = `impure ${seg.purity.toFixed(2)}`;
+      chip.title = "this clip's voice doesn't match the speaker's own " +
+        "voiceprint — likely crosstalk or a diarization error. Listen before trusting it.";
+      text.appendChild(chip);
+    }
+    (al?.clipped || []).forEach((side) => {
+      const chip = document.createElement("span");
+      chip.className = "chip over";
+      chip.textContent = `✂ ${side}`;
+      chip.title = `the ${side === "start" ? "first" : "last"} word runs into the ` +
+        `clip edge — probably cut in half by segmentation`;
+      text.appendChild(chip);
+    });
     row.appendChild(text);
     row.onclick = () => seekPlay(seg.start);
     el.appendChild(row);

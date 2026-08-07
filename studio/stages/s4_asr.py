@@ -105,7 +105,10 @@ def run(job_dir: Path, report) -> None:
         raise RuntimeError("segments.jsonl missing — run segment first")
 
     from ..manifests import read_json
-    engine = read_json(job_dir / "job.json").get("asr_engine", "srota")
+    # default engine = sarvam (user decision 2026-08-07); srota stays available
+    # via /stages/asr?engine=srota. NOTE: sarvam drops fillers — hesitates-tag
+    # segments should escalate to Gemini verbatim once GEMINI_API_KEY exists.
+    engine = read_json(job_dir / "job.json").get("asr_engine", "sarvam")
     if engine == "sarvam":
         _run_sarvam_all(job_dir, segments, report)
         return

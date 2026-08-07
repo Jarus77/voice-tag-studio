@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -62,9 +62,9 @@
 
 <section class="card hidden" id="transcriptSec">
   <div class="cardHead">
-    <h2>Transcript</h2>
+    <h2>Segments</h2>
     <span id="transcriptBadge" class="badge"></span>
-    <span class="hint">click a row to seek · click a word to jump to it · hover a word for its exact timing</span>
+    <span class="hint">each clip: waveform + words · ▶ plays just that clip · words highlight as it plays · click a word to jump</span>
     <label class="hint" style="margin-left:auto"><input type="checkbox" id="showWordTimes" style="vertical-align:-2px"> show word times</label>
   </div>
   <div id="transcriptEmpty" class="empty"></div>
@@ -93,6 +93,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

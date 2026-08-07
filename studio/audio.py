@@ -81,7 +81,7 @@ def compute_peaks(wav: Path, n_bins: int = 2000) -> dict:
 
 def peaks_cached(wav: Path, cache_dir: Path, n_bins: int = 2000) -> dict:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache = cache_dir / (wav.stem + ".json")
+    cache = cache_dir / f"{wav.stem}.{n_bins}.json"
     if cache.exists() and cache.stat().st_mtime >= wav.stat().st_mtime:
         return json.loads(cache.read_text())
     data = compute_peaks(wav, n_bins)

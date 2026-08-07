@@ -246,6 +246,44 @@ def get_manifest(vid: str, name: str) -> JSONResponse:
     return JSONResponse(read_jsonl(path))
 
 
+@app.get("/api/jobs/{vid}/segpeaks/{seg_id}")
+def get_segment_peaks(vid: str, seg_id: str) -> JSONResponse:
+    """Mini-waveform for one segment (lazy, cached)."""
+    from studio.audio import peaks_cached
+    if "/" in seg_id or ".." in seg_id:
+        raise HTTPException(400, "bad seg_id")
+    row = next((r for r in read_jsonl(JOBS_DIR / vid / "manifests" / "segments.jsonl")
+                if r["seg_id"] == seg_id), None)
+    if row is None:
+        raise HTTPException(404, "no such segment")
+    wav = JOBS_DIR / vid / row["wav"]
+    if not wav.exists():
+        raise HTTPException(404, "segment wav missing")
+    return JSONResponse(peaks_cached(wav, JOBS_DIR / vid / "peaks" / "segments", 160))
+
+
+class SpeakerName(BaseModel):
+    speaker: str
+    name: str
+
+
+@app.post("/api/jobs/{vid}/speaker_name")
+def set_speaker_name(vid: str, body: SpeakerName) -> dict:
+    """Name a diarized speaker (e.g. SPEAKER_00 -> 'khushi' / 'agent').
+    pyannote labels are arbitrary — the dataset needs a real voice identity."""
+    job = store.get(vid)
+    if job is None:
+        raise HTTPException(404, "no such job")
+    names = dict(job.get("speaker_names") or {})
+    clean = body.name.strip()[:40]
+    if clean:
+        names[body.speaker] = clean
+    else:
+        names.pop(body.speaker, None)
+    store.set_field(vid, "speaker_names", names)
+    return {"speaker_names": names}
+
+
 @app.get("/api/jobs/{vid}/peaks/{name}")
 def get_peaks(vid: str, name: str) -> JSONResponse:
     from studio.audio import peaks_cached

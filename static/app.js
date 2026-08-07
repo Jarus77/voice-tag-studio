@@ -328,11 +328,29 @@ function renderTracks() {
     const isSpk = s.name.startsWith("SPEAKER_");
     label.innerHTML =
       `<button class="mute" title="toggle this lane in the mix">🔇</button>` +
-      `<span class="lname" style="color:${info.color}">${info.label}</span>` +
+      `<span class="lname" style="color:${info.color}" ${isSpk ? 'title="click to name this voice (e.g. agent / khushi) — pyannote labels are arbitrary"' : ""}>` +
+      `${isSpk ? speakerLabel(s.name) : info.label}</span>` +
       (isSpk
         ? `<button class="samiso" title="build a clean full-length lane for this speaker: original where they speak alone, SepFormer separation at overlap windows, silence elsewhere">clean</button>`
         : "");
-    if (isSpk) row.dataset.speaker = s.name;
+    if (isSpk) {
+      row.dataset.speaker = s.name;
+      label.querySelector(".lname").onclick = async (ev) => {
+        ev.stopPropagation();
+        const cur = (state.job.speaker_names || {})[s.name] || "";
+        const name = prompt(
+          `Name this voice (the dataset needs a real identity — ` +
+          `"${s.name}" is just pyannote's arbitrary label):`, cur);
+        if (name === null) return;
+        await fetch(`/api/jobs/${state.vid}/speaker_name`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ speaker: s.name, name }),
+        });
+        state.tracks.clear();
+        $("tracks").innerHTML = "";
+        poll();
+      };
+    }
     label.querySelector(".mute").onclick = (ev) => {
       ev.stopPropagation();
       toggleLane(s.name);
@@ -482,6 +500,7 @@ player.addEventListener("seeked", () => eachLive((a) => { a.currentTime = player
 player.addEventListener("ratechange", () => eachLive((a) => { a.playbackRate = player.playbackRate; }));
 player.addEventListener("timeupdate", () => {
   drawAll();
+  highlightPlaying();
   eachLive((a) => {                        // drift correction
     if (Math.abs(a.currentTime - player.currentTime) > 0.1)
       a.currentTime = player.currentTime;
@@ -491,6 +510,32 @@ player.addEventListener("timeupdate", () => {
     state.playStopAt = null;
   }
 });
+
+/** karaoke: mark the segment row and word under the playhead */
+let _lastRow = null;
+function highlightPlaying() {
+  const t = player.currentTime;
+  const rows = document.querySelectorAll("#transcript .seg");
+  let active = null;
+  for (const r of rows) {
+    if (t >= parseFloat(r.dataset.start) && t <= parseFloat(r.dataset.end)) {
+      active = r; break;
+    }
+  }
+  if (_lastRow && _lastRow !== active) {
+    _lastRow.classList.remove("playing");
+    _lastRow.querySelectorAll(".w.now").forEach((w) => w.classList.remove("now"));
+  }
+  if (!active) { _lastRow = null; return; }
+  active.classList.add("playing");
+  active.querySelectorAll(".w").forEach((w) => {
+    const on = t >= parseFloat(w.dataset.a) && t <= parseFloat(w.dataset.b);
+    w.classList.toggle("now", on);
+  });
+  const cv = active.querySelector(".segwave");
+  if (cv?._peaks) drawSegWave(cv);
+  _lastRow = active;
+}
 
 function drawAll() {
   const segById = Object.fromEntries(state.segments.map((s) => [s.seg_id, s]));
@@ -617,6 +662,46 @@ function fmtT(t) {
   return `${m}:${s.padStart(4, "0")}`;
 }
 
+function speakerLabel(spk) {
+  const nm = (state.job?.speaker_names || {})[spk];
+  return nm ? `${nm} (${spk.replace("SPEAKER_", "S")})` : spk.replace("SPEAKER_", "S");
+}
+
+/** lazy mini-waveform for a segment row (drawn once it scrolls into view) */
+const segPeakObserver = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (!e.isIntersecting) return;
+    segPeakObserver.unobserve(e.target);
+    const cv = e.target;
+    fetch(`/api/jobs/${state.vid}/segpeaks/${cv.dataset.seg}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (p) { cv._peaks = p; drawSegWave(cv); } })
+      .catch(() => {});
+  });
+}, { rootMargin: "300px" });
+
+function drawSegWave(cv) {
+  const p = cv._peaks;
+  const W = (cv.width = cv.clientWidth * devicePixelRatio);
+  const H = (cv.height = cv.clientHeight * devicePixelRatio);
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  if (!p?.bins?.length) return;
+  const mid = H / 2, bw = W / p.bins.length;
+  ctx.fillStyle = cv.dataset.color + "aa";
+  p.bins.forEach(([mn, mx], i) => {
+    const y0 = mid + mn * mid * 0.9, y1 = mid + mx * mid * 0.9;
+    ctx.fillRect(i * bw, Math.min(y0, y1), Math.max(1, bw * 0.85), Math.abs(y1 - y0) || 1);
+  });
+  // playhead while this segment is the one playing
+  const s = parseFloat(cv.dataset.start), d = parseFloat(cv.dataset.dur);
+  const t = player.currentTime;
+  if (t >= s && t <= s + d) {
+    ctx.fillStyle = "#e8eef4";
+    ctx.fillRect(((t - s) / d) * W, 0, Math.max(1.5, devicePixelRatio), H);
+  }
+}
+
 function renderTranscript() {
   const el = $("transcript");
   el.innerHTML = "";
@@ -629,12 +714,38 @@ function renderTranscript() {
     const al = state.alignments[seg.seg_id];
     const row = document.createElement("div");
     row.className = "seg";
+    row.dataset.seg = seg.seg_id;
+    row.dataset.start = seg.start;
+    row.dataset.end = seg.end;
 
+    // ---- left column: identity, timing, mini waveform, play button ----
     const meta = document.createElement("div");
     meta.className = "meta";
+    const col = spkColor(seg.speaker);
     meta.innerHTML =
-      `<span class="dot" style="background:${spkColor(seg.speaker)}"></span>` +
-      `${seg.speaker.replace("SPEAKER_", "S")}<br>${fmtT(seg.start)} · ${seg.dur.toFixed(1)}s`;
+      `<div class="segid"><span class="dot" style="background:${col}"></span>` +
+      `<b>${speakerLabel(seg.speaker)}</b></div>` +
+      `<div class="segtime">${fmtT(seg.start)} → ${fmtT(seg.end)} · ${seg.dur.toFixed(1)}s</div>` +
+      `<canvas class="segwave" data-seg="${seg.seg_id}" data-start="${seg.start}" ` +
+      `data-dur="${seg.dur}" data-color="${col}"></canvas>` +
+      `<div class="segbtns"><button class="segplay">▶ play clip</button>` +
+      (seg.purity != null ? `<span class="hint" title="voice match to this speaker's own voiceprint">purity ${seg.purity.toFixed(2)}</span>` : "") +
+      `</div>`;
+    const cv = meta.querySelector(".segwave");
+    segPeakObserver.observe(cv);
+    cv.onclick = (ev) => {
+      ev.stopPropagation();
+      const f = ev.offsetX / cv.clientWidth;
+      state.playStopAt = seg.end;
+      player.currentTime = seg.start + f * seg.dur;
+      player.play().catch(() => {});
+    };
+    meta.querySelector(".segplay").onclick = (ev) => {
+      ev.stopPropagation();
+      state.playStopAt = seg.end;
+      player.currentTime = seg.start;
+      player.play().catch(() => {});
+    };
     row.appendChild(meta);
 
     const text = document.createElement("div");
@@ -647,6 +758,8 @@ function renderTranscript() {
         const span = document.createElement("span");
         span.className = "w";
         const abs = seg.start + w.start;
+        span.dataset.a = abs;
+        span.dataset.b = seg.start + w.end;
         span.innerHTML = w.w.replace(/&/g, "&amp;").replace(/</g, "&lt;") +
           (showTimes ? `<sub class="wt">${abs.toFixed(2)}</sub>` : "") + " ";
         // MMS forced-alignment timing, ~10ms precision

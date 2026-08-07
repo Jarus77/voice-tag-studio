@@ -73,6 +73,7 @@
     <span><b class="lg-imp">impure 0.54</b> = voice match to this speaker's own voiceprint is below 0.55 — listen: crosstalk, wrong speaker, or a false alarm</span>
     <span><b class="lg-imp">✂ start/end</b> = the first/last word runs into the clip edge — probably cut in half</span>
     <span><b class="lg-plain">digits_uncertain</b> = the clip has unaligned audio, but the text contains digits (87,000 · 10-15%) which forced alignment can't time — usually harmless. Dotted-underlined words are those untimed tokens.</span>
+    <span><b class="lg-plain">deva 76% / lat 24%</b> = script mix of the transcript (Devanagari vs Latin). Hinglish keeps English words in Latin, so <b>lat 0%</b> on a clip where you hear English means the ASR transliterated it (प्रॉफिट instead of profit) — on pure-Hindi speech lat 0% is correct.</span>
   </div>
   <div id="transcriptEmpty" class="empty"></div>
   <div id="transcript"></div>
@@ -100,6 +101,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=34"></script>
+<script src="app.js?v=35"></script>
 </body>
 </html>

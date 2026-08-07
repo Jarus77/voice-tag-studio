@@ -294,6 +294,7 @@ class SeparateReq(BaseModel):
     reranking: int = 1
     speaker: str | None = None   # set -> diarization-span prompting (issue #5)
     full: bool = False           # speaker set + full -> sweep the whole audio
+    engine: str = "auto"         # auto | sepformer | sam  (clean-lane builds)
 
 
 @app.post("/api/jobs/{vid}/separate")
@@ -313,9 +314,10 @@ def run_separate(vid: str, body: SeparateReq) -> dict:
 
     if body.full and spk:
         from studio.clean_lane import build_clean_lane
+        eng = body.engine
 
         def fn(dir_: Path, report) -> None:
-            build_clean_lane(dir_, report, spk, model=m, reranking=rr)
+            build_clean_lane(dir_, report, spk, model=m, reranking=rr, engine=eng)
     else:
         def fn(dir_: Path, report) -> None:
             run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)

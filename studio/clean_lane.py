@@ -230,7 +230,7 @@ def _paste(track: np.ndarray, y: np.ndarray, i0: int, i1: int) -> None:
 
 def build_clean_lane(job_dir: Path, report, speaker: str,
                      model: str = "facebook/sam-audio-base",
-                     reranking: int = 1) -> list[str]:
+                     reranking: int = 1, engine: str = "auto") -> list[str]:
     import soundfile as sf
 
     from .audio import load_audio, render_masked_track
@@ -249,13 +249,14 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
                      | {int((e - 1e-3) // WINDOW_S) for s, e in suspects})
     windows = [(i * WINDOW_S, min((i + 1) * WINDOW_S, total_s)) for i in win_idx]
 
-    engine = "sepformer" if n_speakers == 2 else "sam"
+    if engine == "auto":
+        engine = "sepformer" if n_speakers == 2 else "sam"
     report(f"{len(suspects)} suspect regions (turns:{n1} acoustic:{n2}) -> "
            f"{engine.upper()} on {len(windows)} windows", 0.06)
 
-    # base: masked original
+    # base: masked original — engine-suffixed lane so A/B comparison is easy
     slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower())
-    name = f"sam_{slug}_clean"
+    name = f"sam_{slug}_clean_{engine}"
     dest = job_dir / "audio" / f"{name}.wav"
     render_masked_track(audio, my, dest, 16000)
     track, _ = sf.read(dest, dtype="float32")
@@ -291,7 +292,7 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
     n_pass = sum(1 for w in purity["windows"] if w["pass"])
     n_scored = sum(1 for w in purity["windows"] if w["pass"] is not None)
-    (job_dir / "manifests" / f"clean_purity_{slug}.json").write_text(
+    (job_dir / "manifests" / f"clean_purity_{slug}_{engine}.json").write_text(
         json.dumps(purity, indent=1))
     report(f"clean lane ready ({engine}): {n_pass}/{n_scored} scored windows "
            f"pass purity ≥{PURITY_OK} "

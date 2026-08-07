@@ -326,8 +326,8 @@ function laneInfo(name) {
   // friendly labels + lane accent colors, Meta-editor style
   if (name === "original") return { label: "Original sound", color: "#3ecf8e" };
   if (name === "denoised") return { label: "Denoised (demucs)", color: "#4da3ff" };
-  let m = name.match(/^sam_(.+)_clean$/);
-  if (m) return { label: `Clean: ${m[1].replace(/_/g, " ")} (orig + SAM)`, color: "#ffd166" };
+  let m = name.match(/^sam_(.+)_clean(?:_(\w+))?$/);
+  if (m) return { label: `Clean: ${m[1].replace(/_/g, " ")}${m[2] ? " · " + m[2] : ""}`, color: "#ffd166" };
   m = name.match(/^sam_(.+)_target$/);
   if (m) return { label: `Isolated: ${m[1].replace(/_/g, " ")}`, color: "#ff7ab0" };
   m = name.match(/^sam_(.+)_residual$/);

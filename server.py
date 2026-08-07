@@ -101,11 +101,11 @@ def create_job(body: NewJob) -> dict:
     if not vid:
         raise HTTPException(400, "could not resolve a YouTube video id from that URL")
     job = store.create(vid, body.url.strip())
-    # enqueue every not-yet-done stage in order
-    for stage in STAGE_ORDER:
-        fn = (lambda d, r, u=body.url.strip(): s0_ingest.run(d, r, u)) \
-            if stage == "ingest" else STAGE_FNS[stage]
-        store.enqueue_stage(vid, stage, fn, force=False)
+    # manual pipeline control: only ingest runs automatically (so there is
+    # audio to inspect) — every other stage runs when its step is clicked
+    store.enqueue_stage(
+        vid, "ingest",
+        lambda d, r, u=body.url.strip(): s0_ingest.run(d, r, u), force=False)
     return {"video_id": vid, "job": job}
 
 
@@ -125,10 +125,9 @@ async def upload_audio(file: UploadFile) -> dict:
     (job_dir / f"master{ext}").write_bytes(raw)
     store.create(vid, "")          # url="" -> upload mode in s0_ingest
     store.set_field(vid, "title", f"{stem} (upload)")
-    for stage in STAGE_ORDER:
-        fn = (lambda d, r: s0_ingest.run(d, r, "")) if stage == "ingest" \
-            else STAGE_FNS[stage]
-        store.enqueue_stage(vid, stage, fn, force=False)
+    # manual pipeline control: only ingest auto-runs
+    store.enqueue_stage(vid, "ingest",
+                        lambda d, r: s0_ingest.run(d, r, ""), force=False)
     return {"video_id": vid}
 
 

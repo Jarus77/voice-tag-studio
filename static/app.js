@@ -103,6 +103,17 @@ $("fileInput").addEventListener("change", async (ev) => {
   }
 });
 
+$("runRemaining").addEventListener("click", async () => {
+  if (!state.vid || !state.job) return;
+  for (const [name, st] of Object.entries(state.job.stages)) {
+    if (["done", "running", "queued"].includes(st.status)) continue;
+    state.optimistic[name] = true;
+    await fetch(`/api/jobs/${state.vid}/stages/${name}?force=false`, { method: "POST" });
+  }
+  renderStepper();
+  poll();
+});
+
 /* ---------------- SAM-Audio isolate panel ---------------- */
 
 $("sepAtPlayhead").addEventListener("click", () => {
@@ -227,6 +238,7 @@ function renderStepper() {
       `<span class="sub">${status === "running" ? (st.msg || pct + "%")
         : status === "queued" ? "queued"
         : status === "error" ? "failed — click to retry"
+        : status === "pending" ? "▶ click to run"
         : STAGE_EXPLAIN[name] || ""}</span></span>` +
       (status === "running" ? `<span class="stepbar"><i style="width:${pct}%"></i></span>` : "");
     step.title = st.msg || `${name}: ${status}` + " (click to rerun)";

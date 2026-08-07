@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -29,6 +29,7 @@
     <span id="jobTitle" class="hint"></span>
     <span style="margin-left:auto" class="hint">diarizer:</span>
     <select id="diarPicker" title="model used when (re)running the diarize stage"></select>
+    <button id="runRemaining" title="queue every not-yet-done stage, in order">Run remaining ▸</button>
   </div>
   <div id="stepper" class="stepper"></div>
   <div id="stageError" class="stageError hidden"></div>
@@ -107,6 +108,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

@@ -170,8 +170,7 @@ def run(job_dir: Path, report) -> None:
                 cents[spk] = speaker_centroid(original, my, others)
             except Exception:
                 cents[spk] = None
-        import soundfile as sf
-        for i, r in enumerate(rows):
+        for i, r in enumerate(rows):   # sf is imported at module level
             c = cents.get(r["speaker"])
             if c is None:
                 continue

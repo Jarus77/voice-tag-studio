@@ -20,14 +20,29 @@ from .stages.s4_asr import sarvam_transcribe
 ENGINES = ["srota", "sarvam", "gemini"]   # whisper dropped by user's call
 
 GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_PROMPT = (
-    "Transcribe this Hindi/Hinglish audio VERBATIM, exactly as spoken. "
-    "Write Hindi words in Devanagari and English words in Latin script, "
-    "preserving the speaker's actual code-switching. "
-    "KEEP all fillers (उह, हम्म, अं, हाँ, मतलब), repetitions, false starts "
-    "and incomplete words — do NOT clean anything up. "
-    "Output ONLY the transcript text, nothing else."
-)
+GEMINI_PROMPT = """Transcribe this Hindi/Hinglish (code-mixed) audio VERBATIM.
+
+SCRIPT RULE — this is the most important instruction:
+• Hindi words → Devanagari.
+• English words → LATIN script, always. NEVER transliterate an English word
+  into Devanagari, no matter how commonly it is spoken in Hindi.
+• This includes brand names, products, finance/tech terms and abbreviations.
+
+Correct:  आप ICICI में trades phone में लेते हो या laptop PC में?
+WRONG:    आप आई सी आई सी में ट्रेड्स फ़ोन में लेते हो या लैपटॉप पीसी में?
+
+Correct:  And returns की बात करें तो quarter में 87,000 का profit बनाया था
+WRONG:    एंड रिटर्न्स की बात करें तो क्वार्टर में 87,000 का प्रॉफिट बनाया था
+
+Correct:  हमारा focus purely quality trade and consistency पे है
+WRONG:    हमारा फोकस प्योरली क्वालिटी ट्रेड एंड कंसिस्टेंसी पे है
+
+VERBATIM RULE:
+• Keep every filler exactly as spoken (उह, अह, हम्म, अं, हाँ, मतलब, यानी,
+  uh, um, hmm), plus repetitions, false starts and incomplete words.
+• Do not clean up, summarise, translate or reorder anything.
+
+Output ONLY the transcript text — no preamble, no notes."""
 
 def _run_srota(job_dir: Path, segs: list[dict], report) -> dict[str, dict]:
     batch = job_dir / "_bakeoff_batch.json"

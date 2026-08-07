@@ -842,6 +842,16 @@ function renderTranscript() {
         c.position_s != null && c.position_s >= w.start && c.position_s <= w.end);
       if (!placed) text.appendChild(makeChip(c, seg));
     });
+    // script-mix indicator: catches an ASR drifting to all-Devanagari
+    if (tr?.script && tr.script.chars > 8) {
+      const chip = document.createElement("span");
+      const lat = tr.script.latin_frac;
+      chip.className = "chip status";
+      chip.textContent = `deva ${Math.round(tr.script.deva_frac * 100)}% / lat ${Math.round(lat * 100)}%`;
+      chip.title = "script mix — Hinglish should keep English words in Latin; "
+        + "0% Latin on English-heavy speech means the ASR transliterated them";
+      text.appendChild(chip);
+    }
     if (al?.status && al.status !== "clean") {
       const chip = document.createElement("span");
       chip.className = `chip status ${al.status}`;

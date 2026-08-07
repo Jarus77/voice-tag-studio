@@ -284,6 +284,27 @@ def run_detect(vid: str, body: DetectReq) -> dict:
             "source": body.source or det.source or DETECTOR_SOURCE_DEFAULT}
 
 
+# ---------------- ASR bake-off (Phase 1) ----------------
+
+class BakeoffReq(BaseModel):
+    limit: int = 12
+
+
+@app.post("/api/jobs/{vid}/bakeoff")
+def run_asr_bakeoff(vid: str, body: BakeoffReq) -> dict:
+    from studio.asr_bakeoff import run_bakeoff
+    job_dir = JOBS_DIR / vid
+    if not (job_dir / "manifests" / "segments.jsonl").exists():
+        raise HTTPException(409, "run the segment stage first")
+    lim = max(1, min(int(body.limit), 40))
+
+    def fn(dir_: Path, report) -> None:
+        run_bakeoff(dir_, report, limit=lim)
+
+    store.enqueue_detect(vid, "bakeoff", fn)
+    return {"queued": True}
+
+
 # ---------------- SAM-Audio separation ----------------
 
 class SeparateReq(BaseModel):

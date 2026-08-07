@@ -182,6 +182,18 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 #hits button { padding: 2px 12px; font-size: 12px; }
 .score { color: var(--acc); font-family: var(--mono); }
 
+/* ---------- ASR bake-off ---------- */
+.baketab { border-collapse: collapse; width: 100%; margin-top: 12px; table-layout: fixed; }
+.baketab th, .baketab td {
+  border: 1px solid var(--line); padding: 6px 9px; text-align: left;
+  font-size: 13px; vertical-align: top; word-break: break-word;
+}
+.baketab th { color: var(--acc); font-weight: 600; }
+.baketab th:first-child, .baketab td:first-child { width: 74px; font-family: var(--mono); font-size: 11px; }
+.baketab mark { background: #5e4a1e; color: #ffd166; border-radius: 3px; padding: 0 2px; }
+.baketab .bmiss { color: var(--err); font-family: var(--mono); font-size: 11px; }
+.baketab tr:hover td { background: var(--panel); }
+
 /* ---------- transport (fixed bottom) ---------- */
 #transport {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;

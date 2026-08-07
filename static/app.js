@@ -261,6 +261,7 @@ async function poll() {
   await loadManifests();
   renderDetectors();
   renderSepStatus();
+  renderBakeStatus();
   renderEmptyStates();
 }
 
@@ -583,8 +584,14 @@ async function loadManifests() {
     state.alignments = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
     state.loaded.alignments = true; dirty = true;
   }
+  if (st.segment?.status === "done") $("bakeoffSec").classList.remove("hidden");
+  if ((state.job.detectors || {}).bakeoff?.status === "done" && !state.loaded.bakeoff) {
+    const rows = await get("asr_bakeoff.jsonl");
+    if (rows) { renderBakeoff(rows); state.loaded.bakeoff = true; }
+  }
   const dets = state.job.detectors || {};
   for (const [name, d] of Object.entries(dets)) {
+    if (name === "bakeoff") continue;
     if (d.status === "done" && !state.loaded["cand_" + name]) {
       state.candidates = state.candidates
         .filter((c) => c.detector_name !== name)
@@ -707,6 +714,84 @@ function playWindow(t) {
   player.currentTime = Math.max(0, t - 2);
   state.playStopAt = t + 2;
   player.play().catch(() => {});
+}
+
+/* ---------------- ASR bake-off (Phase 1) ---------------- */
+
+const FILLER_RE = /(उह+|हम्+म?|अं+|अच्छा|मतलब|यानी|हाँ|\b(?:uh+|um+|hmm+|haan|like)\b)/gi;
+const BAKE_ENGINES = ["srota", "sarvam", "whisper", "gemini"];
+
+$("bakeRun").addEventListener("click", async () => {
+  const btn = $("bakeRun");
+  btn.disabled = true; btn.textContent = "Running…";
+  state.loaded.bakeoff = false;
+  const r = await fetch(`/api/jobs/${state.vid}/bakeoff`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit: parseInt($("bakeLimit").value, 10) || 12 }),
+  });
+  if (!r.ok) {
+    banner("bake-off: " + ((await r.json()).detail || r.status));
+    btn.disabled = false; btn.textContent = "Run bake-off";
+  }
+  poll();
+});
+
+function renderBakeStatus() {
+  const d = (state.job.detectors || {}).bakeoff;
+  const el = $("bakeStatus");
+  const btn = $("bakeRun");
+  if (!d) { el.textContent = ""; return; }
+  const busy = d.status === "running" || d.status === "queued";
+  const elapsed = d.status === "running" && d.started
+    ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
+  el.className = `detStatus ${d.status}`;
+  el.innerHTML = busy
+    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}${elapsed}`
+    : d.status === "error" ? `✗ ${d.msg || "failed"}` : `✓ ${d.msg || "done"}`;
+  btn.disabled = !!busy;
+  btn.textContent = busy ? "Running…" : "Run bake-off";
+}
+
+function markFillers(text) {
+  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return esc.replace(FILLER_RE, "<mark>$1</mark>");
+}
+
+function renderBakeoff(rows) {
+  const el = $("bakeResults");
+  if (!rows || !rows.length) { el.innerHTML = ""; return; }
+  const fillerCount = (t) => (t.match(FILLER_RE) || []).length;
+  const totals = {};
+  BAKE_ENGINES.forEach((e) => {
+    totals[e] = {
+      miss: rows.filter((r) => !(r.engines[e]?.text)).length,
+      fillers: rows.reduce((n, r) => n + fillerCount(r.engines[e]?.text || ""), 0),
+    };
+  });
+  let html = `<table class="baketab"><tr><th>seg</th>` +
+    BAKE_ENGINES.map((e) =>
+      `<th>${e}<span class="hint"> · ∅${totals[e].miss} · fillers ${totals[e].fillers}</span></th>`
+    ).join("") + "</tr>";
+  rows.forEach((r) => {
+    html += `<tr><td class="bseg" data-s="${r.start}" data-e="${r.start + r.dur}">` +
+      `▶ ${fmtT(r.start)}<br><span class="hint">${(r.speaker || "").replace("SPEAKER_", "S")} · ${r.dur.toFixed(1)}s</span></td>`;
+    BAKE_ENGINES.forEach((e) => {
+      const c = r.engines[e] || {};
+      html += c.text
+        ? `<td>${markFillers(c.text)}</td>`
+        : `<td class="bmiss">∅ ${c.error ? c.error.slice(0, 60) : "missed"}</td>`;
+    });
+    html += "</tr>";
+  });
+  el.innerHTML = html + "</table>";
+  el.querySelectorAll(".bseg").forEach((td) => {
+    td.style.cursor = "pointer";
+    td.onclick = () => {
+      state.playStopAt = parseFloat(td.dataset.e);
+      player.currentTime = parseFloat(td.dataset.s);
+      player.play().catch(() => {});
+    };
+  });
 }
 
 /* ---------------- detectors ---------------- */

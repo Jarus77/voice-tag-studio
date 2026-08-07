@@ -151,12 +151,13 @@ def _separate_window_sam(job_dir, speaker, a, b, model, reranking):
 
 
 def _spans_audio(x: np.ndarray, spans_rel: list[tuple]) -> np.ndarray | None:
-    """Concatenate the given (window-relative) spans of x; None if <0.5s."""
+    """Concatenate the given (window-relative) spans of x; None if <0.5s.
+    Capped at 10s total — enough for an embedding, bounded CPU."""
     parts = [x[int(s * 16000):int(e * 16000)] for s, e in spans_rel]
     parts = [p for p in parts if len(p)]
     if not parts:
         return None
-    cat = np.concatenate(parts).astype(np.float32)
+    cat = np.concatenate(parts).astype(np.float32)[:160000]
     return cat if len(cat) >= 8000 else None
 
 
@@ -185,7 +186,11 @@ def _separate_window_sepformer(audio16, a, b, centroid, my_spans_rel):
 # ---------------- purity ----------------
 
 def speaker_centroid(audio16: np.ndarray, my_turns, others) -> np.ndarray:
-    """Embedding centroid from up to 8 solo turns of the target speaker."""
+    """Embedding centroid from up to 8 solo turns of the target speaker.
+
+    Each snippet is CAPPED at 5s — ecapa needs a few seconds of voice, and
+    embedding a multi-minute solo stretch on CPU is what once hung a build
+    for 13 minutes."""
     from .intervals import subtract_intervals
     solo = subtract_intervals(my_turns, others)
     solo = [s for s in solo if s[1] - s[0] >= 1.0][:8]
@@ -193,6 +198,7 @@ def speaker_centroid(audio16: np.ndarray, my_turns, others) -> np.ndarray:
         solo = sorted(my_turns, key=lambda t: t[0] - t[1])[:4]
     embs = []
     for a, b in solo:
+        b = min(b, a + 5.0)
         x = audio16[int(a * 16000):int(b * 16000)]
         if len(x) > 8000:
             embs.append(_embed(x.astype(np.float32)))

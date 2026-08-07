@@ -149,12 +149,12 @@ async function isolateSpeaker(speaker) {
     start = Math.max(0, player.currentTime - 5);
     $("sepStart").value = start.toFixed(1);
   }
-  const durTotal = state.tracks.get("original")?.peaks?.duration || 0;
-  const nWin = Math.ceil(durTotal / 10);
+  const nOvWin = new Set((state.job.overlaps || []).map(([a]) => Math.floor(a / 10))).size;
   const full = confirm(
-    `Isolate ${speaker.replace("SPEAKER_", "S")} across the WHOLE audio?\n\n` +
-    `OK  = full sweep (~${nWin} × 10s windows on the GPU — continuous end-to-end lane)\n` +
-    `Cancel = just the 10s window at start=${start.toFixed(0)}s`);
+    `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane?\n\n` +
+    `OK  = smart stitch: original audio where they speak alone, SAM only at the ` +
+    `~${nOvWin} overlap window${nOvWin === 1 ? "" : "s"}, silence elsewhere\n` +
+    `Cancel = isolate just the 10s window at start=${start.toFixed(0)}s`);
   const r = await fetch(`/api/jobs/${state.vid}/separate`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -326,7 +326,9 @@ function laneInfo(name) {
   // friendly labels + lane accent colors, Meta-editor style
   if (name === "original") return { label: "Original sound", color: "#3ecf8e" };
   if (name === "denoised") return { label: "Denoised (demucs)", color: "#4da3ff" };
-  let m = name.match(/^sam_(.+)_target$/);
+  let m = name.match(/^sam_(.+)_clean$/);
+  if (m) return { label: `Clean: ${m[1].replace(/_/g, " ")} (orig + SAM)`, color: "#ffd166" };
+  m = name.match(/^sam_(.+)_target$/);
   if (m) return { label: `Isolated: ${m[1].replace(/_/g, " ")}`, color: "#ff7ab0" };
   m = name.match(/^sam_(.+)_residual$/);
   if (m) return { label: `Without: ${m[1].replace(/_/g, " ")}`, color: "#7fd1d8" };

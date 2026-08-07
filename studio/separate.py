@@ -39,18 +39,22 @@ def _decode_16k(wav_bytes: bytes):
 def run_sam_speaker_full(job_dir: Path, report, speaker: str,
                          model: str = "facebook/sam-audio-base",
                          reranking: int = 1) -> list[str]:
-    """Isolate one speaker across the ENTIRE audio: sweep 10s windows,
-    span-prompt each window where the speaker talks, stitch a continuous
-    full-length Isolated/Without lane pair.
+    """Smart full-track clean lane for one speaker:
 
-    Windows without the speaker are skipped (target stays silent there;
-    residual keeps the original audio — nothing to remove)."""
+        where the speaker is ALONE     -> original audio (perfect, free)
+        where speakers OVERLAP         -> SAM-separated speaker (GPU, only here)
+        where the speaker is silent    -> silence
+
+    SAM only touches the 10s windows containing an overlap involving this
+    speaker — the cheapest way to a continuous clean lane, and the original
+    (best fidelity) is kept everywhere separation isn't needed."""
     import json
 
     import numpy as np
     import soundfile as sf
 
-    from .audio import load_audio
+    from .audio import load_audio, render_masked_track
+    from .intervals import merge_close
 
     original = job_dir / "audio" / "original.wav"
     audio = load_audio(original, 16000)
@@ -61,53 +65,62 @@ def run_sam_speaker_full(job_dir: Path, report, speaker: str,
     turns = next((r["turns"] for r in rows if r["speaker"] == speaker), None)
     if not turns:
         raise RuntimeError(f"unknown speaker {speaker}")
+    my = [(t["start"], t["end"]) for t in turns]
+    others = [(t["start"], t["end"]) for r in rows if r["speaker"] != speaker
+              for t in r["turns"]]
 
-    windows = []
-    t = 0.0
-    while t < total_s:
-        a, b = t, min(t + WINDOW_S, total_s)
-        active = sum(min(tr["end"], b) - max(tr["start"], a)
-                     for tr in turns if tr["end"] > a and tr["start"] < b)
-        if active >= 0.3:
-            windows.append((a, b))
-        t += WINDOW_S
-    if not windows:
-        raise RuntimeError(f"{speaker} never speaks?")
+    # overlaps involving THIS speaker
+    ov = []
+    for a, b in my:
+        for c, d in others:
+            s, e = max(a, c), min(b, d)
+            if e - s >= 0.1:
+                ov.append((s, e))
+    ov = merge_close(ov, 0.2)
 
-    report(f"{len(windows)} windows of {WINDOW_S:.0f}s to isolate", 0.02)
-    import modal
-    Separator = modal.Cls.from_name(MODAL_APP, "Separator")
-    sep = Separator()
+    # 10s grid windows containing any such overlap
+    win_idx = sorted({int(s // WINDOW_S) for s, e in ov}
+                     | {int((e - 1e-3) // WINDOW_S) for s, e in ov})
+    windows = [(i * WINDOW_S, min((i + 1) * WINDOW_S, total_s)) for i in win_idx]
 
-    target_track = np.zeros(len(audio), dtype=np.float32)
-    residual_track = audio.copy()   # untouched windows keep the original
-    chunk = job_dir / "_sam_chunk.wav"
-    for i, (a, b) in enumerate(windows):
-        subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.2f}", "-t", f"{b - a:.2f}",
-             "-i", str(next(job_dir.glob("master.*"), original)),
-             "-ac", "1", str(chunk)], check=True)
-        anchors = speaker_anchors(job_dir, speaker, a, b - a)
-        out = sep.separate.remote(chunk.read_bytes(), "speech",
-                                  model_name=model, reranking=reranking,
-                                  anchors=anchors)
-        i0, i1 = int(a * 16000), min(len(audio), int(b * 16000))
-        for kind, track in (("target", target_track), ("residual", residual_track)):
-            y = _decode_16k(out[kind])
-            track[i0:i1] = y[: i1 - i0]
-        report(f"window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s)",
-               0.02 + 0.95 * (i + 1) / len(windows))
-    chunk.unlink(missing_ok=True)
-
+    # base lane: masked original (speaker-alone regions at full fidelity)
     slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower())
-    written = []
-    for kind, track in (("target", target_track), ("residual", residual_track)):
-        name = f"sam_{slug}_full_{kind}"
-        sf.write(job_dir / "audio" / f"{name}.wav", track, 16000, subtype="PCM_16")
-        (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
-        written.append(name)
-    report(f"full-length lanes ready: {', '.join(written)}", 1.0)
-    return written
+    name = f"sam_{slug}_clean"
+    dest = job_dir / "audio" / f"{name}.wav"
+    render_masked_track(audio, my, dest, 16000)
+    track, _ = sf.read(dest, dtype="float32")
+
+    if windows:
+        report(f"{len(ov)} overlaps -> SAM on {len(windows)} of "
+               f"{int(np.ceil(total_s / WINDOW_S))} windows", 0.05)
+        import modal
+        Separator = modal.Cls.from_name(MODAL_APP, "Separator")
+        sep = Separator()
+        chunk = job_dir / "_sam_chunk.wav"
+        for i, (a, b) in enumerate(windows):
+            subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.2f}",
+                 "-t", f"{b - a:.2f}",
+                 "-i", str(next(job_dir.glob("master.*"), original)),
+                 "-ac", "1", str(chunk)], check=True)
+            anchors = speaker_anchors(job_dir, speaker, a, b - a)
+            out = sep.separate.remote(chunk.read_bytes(), "speech",
+                                      model_name=model, reranking=reranking,
+                                      anchors=anchors)
+            y = _decode_16k(out["target"])
+            i0, i1 = int(a * 16000), min(len(track), int(b * 16000))
+            track[i0:i1] = y[: i1 - i0]
+            report(f"overlap window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s)",
+                   0.05 + 0.9 * (i + 1) / len(windows))
+        chunk.unlink(missing_ok=True)
+    else:
+        report("no overlaps involve this speaker — clean lane is just the "
+               "masked original", 0.9)
+
+    sf.write(dest, track, 16000, subtype="PCM_16")
+    (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
+    report(f"clean lane ready: {name} (original + SAM @ {len(windows)} windows)", 1.0)
+    return [name]
 
 
 def speaker_anchors(job_dir: Path, speaker: str, start: float,

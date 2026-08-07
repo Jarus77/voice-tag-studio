@@ -32,6 +32,9 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg", "git")
     .pip_install("git+https://github.com/facebookresearch/sam-audio")
+    # sam_audio's BaseModel._from_pretrained requires proxies/resume_download
+    # kwargs that huggingface_hub 1.x stopped passing — pin to 0.x
+    .pip_install("huggingface_hub<1.0")
     .env({"HF_HOME": "/cache/hf"})
 )
 

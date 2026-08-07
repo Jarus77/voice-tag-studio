@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -109,6 +109,40 @@ def create_job(body: NewJob) -> dict:
     return {"video_id": vid, "job": job}
 
 
+@app.post("/api/upload")
+async def upload_audio(file: UploadFile) -> dict:
+    """Uploaded-audio jobs: same pipeline, no yt-dlp. Ideal for short test clips."""
+    import hashlib
+    import re as _re
+    raw = await file.read()
+    if len(raw) < 1000:
+        raise HTTPException(400, "file too small / empty")
+    stem = _re.sub(r"[^A-Za-z0-9_-]+", "_", Path(file.filename or "upload").stem)[:40]
+    vid = f"up_{stem}_{hashlib.sha256(raw).hexdigest()[:6]}"
+    ext = Path(file.filename or "upload.wav").suffix.lower() or ".wav"
+    job_dir = JOBS_DIR / vid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / f"master{ext}").write_bytes(raw)
+    store.create(vid, "")          # url="" -> upload mode in s0_ingest
+    store.set_field(vid, "title", f"{stem} (upload)")
+    for stage in STAGE_ORDER:
+        fn = (lambda d, r: s0_ingest.run(d, r, "")) if stage == "ingest" \
+            else STAGE_FNS[stage]
+        store.enqueue_stage(vid, stage, fn, force=False)
+    return {"video_id": vid}
+
+
+DIARIZERS = {
+    "pyannote/speaker-diarization-community-1":
+        "pyannote community-1 (local MPS, default)",
+}
+
+
+@app.get("/api/diarizers")
+def list_diarizers() -> list[dict]:
+    return [{"id": k, "label": v} for k, v in DIARIZERS.items()]
+
+
 @app.get("/api/jobs")
 def list_jobs() -> list[dict]:
     return store.list()
@@ -159,6 +193,10 @@ def rerun_stage(vid: str, stage: str, force: bool = False,
         if engine not in ("srota", "sarvam"):
             raise HTTPException(400, "engine must be srota or sarvam")
         store.set_field(vid, "asr_engine", engine)
+    if stage == "diarize" and engine:
+        if engine not in DIARIZERS:
+            raise HTTPException(400, f"unknown diarizer; see /api/diarizers")
+        store.set_field(vid, "diarizer", engine)
     if stage == "ingest":
         url = job.get("url", "")
         fn = lambda d, r: s0_ingest.run(d, r, url)  # noqa: E731

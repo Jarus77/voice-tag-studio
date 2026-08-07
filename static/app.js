@@ -83,6 +83,39 @@ $("jobPicker").addEventListener("change", (ev) => {
   if (ev.target.value) selectJob(ev.target.value);
 });
 
+$("uploadBtn").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  const btn = $("uploadBtn");
+  btn.disabled = true; btn.textContent = "uploading…";
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!r.ok) { banner("upload failed: " + ((await r.json()).detail || r.status)); return; }
+    const d = await r.json();
+    await refreshJobList();
+    selectJob(d.video_id);
+  } finally {
+    btn.disabled = false; btn.textContent = "Upload audio";
+    ev.target.value = "";
+  }
+});
+
+// diarizer picker (used when the diarize stage is rerun)
+(async () => {
+  try {
+    const models = await (await fetch("/api/diarizers")).json();
+    const pick = $("diarPicker");
+    models.forEach((m) => {
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = m.label;
+      pick.appendChild(o);
+    });
+  } catch {}
+})();
+
 function selectJob(vid) {
   state.vid = vid;
   state.loaded = {}; state.optimistic = {};
@@ -168,7 +201,10 @@ async function rerunStage(name, status) {
   if (status === "done" && !confirm(`rerun "${name}"? (its output will be rebuilt)`)) return;
   state.optimistic[name] = true;
   renderStepper();
-  await fetch(`/api/jobs/${state.vid}/stages/${name}?force=true`, { method: "POST" });
+  let q = `force=true`;
+  if (name === "diarize" && $("diarPicker").value)
+    q += `&engine=${encodeURIComponent($("diarPicker").value)}`;
+  await fetch(`/api/jobs/${state.vid}/stages/${name}?${q}`, { method: "POST" });
   poll();
 }
 

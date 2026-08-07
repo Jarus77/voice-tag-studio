@@ -17,30 +17,38 @@ from ..manifests import write_json
 
 
 def run(job_dir: Path, report, url: str) -> None:
+    """url == "" means uploaded-audio mode: master.* was saved by the upload
+    endpoint; metadata comes from ffprobe instead of yt-dlp."""
     vid = job_dir.name
     audio_dir = job_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
-    report("fetching metadata", 0.05)
-    meta_raw = subprocess.run(
-        ["yt-dlp", "--no-playlist", "-J", url],
-        capture_output=True, text=True, timeout=120)
-    if meta_raw.returncode != 0:
-        raise RuntimeError(f"yt-dlp metadata: {meta_raw.stderr[-200:]}")
-    meta = json.loads(meta_raw.stdout)
-
     master = next(job_dir.glob("master.*"), None)
-    if master is None:
-        report(f"downloading audio ({meta.get('duration', '?')}s)", 0.15)
-        dl = subprocess.run(
-            ["yt-dlp", "--no-playlist", "-f", "bestaudio",
-             "-o", str(job_dir / "master.%(ext)s"), url],
-            capture_output=True, text=True, timeout=1800)
-        if dl.returncode != 0:
-            raise RuntimeError(f"yt-dlp download: {dl.stderr[-200:]}")
-        master = next(job_dir.glob("master.*"), None)
+    if not url:
         if master is None:
-            raise RuntimeError("download produced no master file")
+            raise RuntimeError("upload job has no master file")
+        meta = {"title": job_dir.name, "channel": "upload",
+                "duration": (probe(master) or {}).get("duration_s")}
+    else:
+        report("fetching metadata", 0.05)
+        meta_raw = subprocess.run(
+            ["yt-dlp", "--no-playlist", "-J", url],
+            capture_output=True, text=True, timeout=120)
+        if meta_raw.returncode != 0:
+            raise RuntimeError(f"yt-dlp metadata: {meta_raw.stderr[-200:]}")
+        meta = json.loads(meta_raw.stdout)
+
+        if master is None:
+            report(f"downloading audio ({meta.get('duration', '?')}s)", 0.15)
+            dl = subprocess.run(
+                ["yt-dlp", "--no-playlist", "-f", "bestaudio",
+                 "-o", str(job_dir / "master.%(ext)s"), url],
+                capture_output=True, text=True, timeout=1800)
+            if dl.returncode != 0:
+                raise RuntimeError(f"yt-dlp download: {dl.stderr[-200:]}")
+            master = next(job_dir.glob("master.*"), None)
+            if master is None:
+                raise RuntimeError("download produced no master file")
 
     report("decoding to 16k mono wav", 0.7)
     wav = audio_dir / "original.wav"

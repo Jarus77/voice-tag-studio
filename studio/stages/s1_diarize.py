@@ -37,8 +37,11 @@ def run(job_dir: Path, report) -> None:
     if not wav.exists():
         raise RuntimeError("audio/original.wav missing — run ingest first")
 
-    report("loading pyannote pipeline", 0.02)
-    pipe = Pipeline.from_pretrained(DIARIZATION_MODEL)
+    from ..manifests import read_json
+    model_id = read_json(job_dir / "job.json").get("diarizer") or DIARIZATION_MODEL
+    short = model_id.split("/")[-1]
+    report(f"loading {short}", 0.02)
+    pipe = Pipeline.from_pretrained(model_id)
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     pipe.to(torch.device(device))
     for attr in ("segmentation_batch_size", "embedding_batch_size"):
@@ -47,11 +50,11 @@ def run(job_dir: Path, report) -> None:
         except Exception:
             pass
 
-    report(f"diarizing on {device}", 0.05)
+    report(f"{short} on {device}", 0.05)
 
     def hook(step_name, step_artifact, file=None, total=None, completed=None):
         if total:
-            report(f"diarize/{step_name} {completed}/{total}",
+            report(f"{short}/{step_name} {completed}/{total}",
                    0.05 + 0.55 * (completed / total))
 
     out = pipe(str(wav), min_speakers=1, max_speakers=MAX_SPEAKERS, hook=hook)

@@ -39,15 +39,20 @@ def _clean_lane_for(job_dir: Path, speaker: str) -> tuple:
         wav = job_dir / "audio" / f"{name}.wav"
         if not wav.exists():
             continue
-        passing = []
+        # the ACTUAL rescued seconds (overlap regions whose separation passed
+        # purity) — not whole windows: solo speech inside a window keeps the
+        # original, so it must not be treated as separated audio
+        rescued = []
         pf = job_dir / "manifests" / (
             f"clean_purity_{slug}_{engine}.json" if engine
             else f"clean_purity_{slug}.json")
         if pf.exists():
-            for w in json.loads(pf.read_text()).get("windows", []):
-                if w.get("pass"):
-                    passing.append((w["start"], w["end"]))
-        return wav, (engine or "legacy"), merge_close(passing, 0.0)
+            data = json.loads(pf.read_text())
+            rescued = [tuple(r) for r in data.get("rescued_regions", [])]
+            if not rescued:      # lanes built before rescued_regions existed
+                rescued = [(w["start"], w["end"]) for w in data.get("windows", [])
+                           if w.get("pass")]
+        return wav, (engine or "legacy"), merge_close(rescued, 0.05)
     return None, None, []
 
 
@@ -133,8 +138,9 @@ def run(job_dir: Path, report) -> None:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 i0, i1 = int(ts * SR), int(te * SR)
                 sf.write(dest, audio[i0:i1], SR, subtype="PCM_16")
-                # does this segment contain rescued (separated) audio?
-                sep = any(a < te and b > ts for a, b in passing)
+                # how much of this clip is separated audio (0 for most clips)
+                sep_s = sum(max(0.0, min(b, te) - max(a, ts))
+                            for a, b in passing)
                 rows.append({
                     "seg_id": seg_id,
                     "video_id": vid,
@@ -145,7 +151,9 @@ def run(job_dir: Path, report) -> None:
                     "wav": f"segments/{spk}/{seg_id}.wav",
                     "over_len": over,
                     "source": source,        # original | clean:<engine>
-                    "separated": bool(sep),  # contains rescued overlap audio
+                    "separated": bool(sep_s > 0.05),
+                    "separated_s": round(sep_s, 2),
+                    "separated_frac": round(sep_s / (te - ts), 3),
                 })
                 n_spk += 1
         n_sep = sum(1 for r in rows[-n_spk:] if r["separated"]) if n_spk else 0

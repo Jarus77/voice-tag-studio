@@ -807,9 +807,11 @@ function renderTranscript() {
       chip.className = "chip status";
       chip.style.borderColor = "#ffd166";
       chip.style.color = "#ffd166";
-      chip.textContent = "rescued";
-      chip.title = `contains separated overlap audio (${seg.source}) — ` +
-        `purity-gated; flagged for dataset filtering`;
+      const pct = Math.round((seg.separated_frac || 0) * 100);
+      chip.textContent = `rescued ${pct}%`;
+      chip.title = `${(seg.separated_s || 0).toFixed(2)}s of this ${seg.dur.toFixed(1)}s ` +
+        `clip is separated overlap audio (${seg.source}); the other ` +
+        `${(100 - pct)}% is untouched original`;
       text.appendChild(chip);
     }
     if (seg.purity != null && !seg.purity_pass) {

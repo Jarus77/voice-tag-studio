@@ -255,39 +255,65 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
 
     purity = {"speaker": speaker, "engine": engine, "purity_ok": PURITY_OK,
               "windows": []}
+    rescued_regions: list[tuple] = []
     for i, (a, b) in enumerate(windows):
         my_rel = [(max(s, a) - a, min(e, b) - a) for s, e in my
                   if e > a and s < b]
         y, assign_sim = _separate_window_sepformer(audio, a, b, centroid, my_rel)
-        # paste separated audio ONLY inside the target's turn spans — outside
-        # them the lane must stay structurally silent, regardless of engine
-        # leakage across the rest of the window
-        base = int(a * 16000)
-        for s, e in my_rel:
-            s = max(0.0, s - 0.1)
-            e = min(b - a, e + 0.1)
-            j0, j1 = int(s * 16000), int(e * 16000)
-            if j1 > j0 and base + j0 < len(track):
-                _paste(track, y[j0:j1], base + j0, min(len(track), base + j1))
+
+        # Paste separated audio ONLY over the real overlap seconds that are
+        # also this speaker's speech. Solo speech inside the window keeps the
+        # ORIGINAL (higher fidelity than any separation) — separation is a
+        # repair, not a replacement.
+        paste = []
+        for s, e in suspects:
+            s2, e2 = max(s, a), min(e, b)
+            if e2 - s2 <= 0:
+                continue
+            for ms, me in my:
+                ps, pe = max(s2, ms), min(e2, me)
+                if pe - ps > 0.02:
+                    paste.append((max(a, ps - 0.1), min(b, pe + 0.1)))
+        paste = merge_close(paste, 0.05)
+
+        i0w, i1w = int(a * 16000), min(len(track), int(b * 16000))
+        before = track[i0w:i1w].copy()
+        for ps, pe in paste:
+            j0, j1 = int((ps - a) * 16000), int((pe - a) * 16000)
+            k0, k1 = int(ps * 16000), min(len(track), int(pe * 16000))
+            if k1 > k0 and j1 > j0:
+                _paste(track, y[j0:j1], k0, k1)
+
         p = purity_of(track, a, b, centroid, my_rel)
+        passed = p is not None and p >= PURITY_OK
+        if p is not None and not passed:
+            track[i0w:i1w] = before      # failed the gate -> keep the original
+        elif passed:
+            rescued_regions.extend(paste)
+
         purity["windows"].append({
             "start": round(a, 1), "end": round(b, 1),
             "purity": None if p is None else round(p, 3),
-            "pass": None if p is None else bool(p >= PURITY_OK),
+            "pass": None if p is None else bool(passed),
             "sparse": p is None,
+            "rescued_s": round(sum(e - s for s, e in paste), 2) if passed else 0.0,
             **({"assign_sim": round(assign_sim, 3)} if assign_sim is not None else {}),
         })
         report(f"{engine} window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s, "
-               f"purity {'n/a (sparse)' if p is None else f'{p:.2f}'})",
+               f"purity {'n/a (sparse)' if p is None else f'{p:.2f}'}"
+               f"{'' if passed else ' — reverted to original'})",
                0.08 + 0.88 * (i + 1) / len(windows))
+    purity["rescued_regions"] = [[round(s, 2), round(e, 2)]
+                                 for s, e in merge_close(rescued_regions, 0.05)]
 
     sf.write(dest, track, 16000, subtype="PCM_16")
     (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
     n_pass = sum(1 for w in purity["windows"] if w["pass"])
     n_scored = sum(1 for w in purity["windows"] if w["pass"] is not None)
+    resc_s = sum(e - s for s, e in merge_close(rescued_regions, 0.05))
     (job_dir / "manifests" / f"clean_purity_{slug}_{engine}.json").write_text(
         json.dumps(purity, indent=1))
-    report(f"clean lane ready ({engine}): {n_pass}/{n_scored} scored windows "
-           f"pass purity ≥{PURITY_OK} "
-           f"({len(windows) - n_scored} too sparse to score)", 1.0)
+    report(f"clean lane ready: {resc_s:.1f}s of overlap rescued "
+           f"({n_pass}/{n_scored} windows passed purity ≥{PURITY_OK}; "
+           f"the rest kept the original)", 1.0)
     return [name]

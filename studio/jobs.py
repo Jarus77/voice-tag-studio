@@ -217,10 +217,12 @@ class JobStore:
                     self.set_stage(vid, stage, status="running", msg="",
                                    progress=0.0, started=_time.time())
                 fn(JOBS_DIR / vid, report)
+                # keep the last reported message — it carries the result
+                # ("0 candidates", "5.5s rescued", …); clearing it hid outcomes
                 if is_det:
-                    self.set_detector(vid, det_name, status="done", msg="")
+                    self.set_detector(vid, det_name, status="done")
                 else:
-                    self.set_stage(vid, stage, status="done", msg="", progress=1.0)
+                    self.set_stage(vid, stage, status="done", progress=1.0)
             except Exception as e:
                 # record FIRST — a dead stdout (broken pipe) must never lose
                 # the error or kill the runner thread

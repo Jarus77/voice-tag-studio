@@ -674,10 +674,16 @@ function renderEmptyStates() {
       + (nImpure ? ` · ${nImpure} impure` : "")
       + (nClip ? ` · ${nClip} clipped` : "")
     : "";
+  const ranDets = Object.entries(state.job.detectors || {})
+    .filter(([n, d]) => d.status === "done" && n !== "separate" && n !== "bakeoff")
+    .map(([n]) => n);
   $("hitsEmpty").innerHTML = state.candidates.length ? "" :
-    (state.segments.length
-      ? "no candidates yet — pick a detector and press <b>Run detector</b>"
-      : waitTxt("segment"));
+    (!state.segments.length ? waitTxt("segment")
+      : ranDets.length
+        ? `<b>${ranDets.join(", ")}</b> ran and found <b>nothing</b> in this audio — ` +
+          `that's a real result, not an error (this material may simply not contain ` +
+          `those events). Try another detector, or audio you know contains them.`
+        : "no candidates yet — pick a detector and press <b>Run detector</b>");
   $("tagsBadge").textContent = state.candidates.length
     ? `${state.candidates.length} candidates` : "";
 }

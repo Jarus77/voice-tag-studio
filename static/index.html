@@ -63,6 +63,10 @@
     <label class="hint">start <input id="sepStart" type="number" min="0" step="0.1" value="0" style="width:90px"></label>
     <button id="sepAtPlayhead" type="button" title="use current playhead position">@playhead</button>
     <label class="hint">dur <input id="sepDur" type="number" min="2" max="30" step="1" value="10" style="width:64px"></label>
+    <select id="sepEngine" title="separation engine for ⧉ clean-lane builds — lanes are engine-suffixed so you can build BOTH and A/B them">
+      <option value="sepformer">engine: SepFormer (local, free)</option>
+      <option value="sam">engine: SAM (Modal GPU)</option>
+    </select>
     <select id="sepModel">
       <option value="facebook/sam-audio-base">base (fast)</option>
       <option value="facebook/sam-audio-large">large (best)</option>
@@ -109,6 +113,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

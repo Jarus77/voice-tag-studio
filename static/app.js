@@ -149,11 +149,14 @@ async function isolateSpeaker(speaker) {
     start = Math.max(0, player.currentTime - 5);
     $("sepStart").value = start.toFixed(1);
   }
+  const engine = $("sepEngine").value;
   const nOvWin = new Set((state.job.overlaps || []).map(([a]) => Math.floor(a / 10))).size;
   const full = confirm(
-    `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane?\n\n` +
-    `OK  = smart stitch: original audio where they speak alone, SAM only at the ` +
-    `~${nOvWin} overlap window${nOvWin === 1 ? "" : "s"}, silence elsewhere\n` +
+    `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane with ` +
+    `${engine.toUpperCase()}?\n\n` +
+    `OK  = smart stitch: original where they speak alone, ${engine} at the ` +
+    `~${nOvWin} overlap window${nOvWin === 1 ? "" : "s"}, silence elsewhere ` +
+    `(lane is engine-suffixed — build both engines to A/B)\n` +
     `Cancel = isolate just the 10s window at start=${start.toFixed(0)}s`);
   const r = await fetch(`/api/jobs/${state.vid}/separate`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -161,6 +164,7 @@ async function isolateSpeaker(speaker) {
       prompt: "speech",
       speaker,
       full,
+      engine,
       start,
       dur: parseFloat($("sepDur").value || "10"),
       model: $("sepModel").value,

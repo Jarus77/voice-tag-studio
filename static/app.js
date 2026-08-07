@@ -773,8 +773,16 @@ function renderTranscript() {
             text.appendChild(makeChip(c, seg));
         });
       });
+    } else if (tr?.text) {
+      text.textContent = tr.text;
+    } else if (tr?.error) {
+      text.innerHTML = `<span class="hint" style="color:var(--err)">⚠ ${tr.error}</span>`;
     } else {
-      text.textContent = tr?.text || (tr?.error ? `⚠ ${tr.error}` : "…");
+      const st = state.job?.stages?.asr?.status || "pending";
+      text.innerHTML = `<span class="hint">no transcript yet — ` +
+        (st === "done" ? "this clip returned empty"
+         : st === "running" ? "asr is running…"
+         : `click the <b>asr</b> step to transcribe (${st})`) + `</span>`;
     }
     cands.forEach((c) => {
       const placed = al?.words?.some((w) =>

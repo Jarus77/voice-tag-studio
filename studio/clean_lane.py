@@ -39,11 +39,11 @@ _seg_inference = None
 def _get_ecapa():
     global _ecapa
     if _ecapa is None:
-        import torch
         from speechbrain.inference.speaker import EncoderClassifier
+        # speechbrain 1.1.0 breaks on mps (missing device_type attr) — cpu is
+        # plenty for 1s embedding windows
         _ecapa = EncoderClassifier.from_hparams(
-            "speechbrain/spkrec-ecapa-voxceleb",
-            run_opts={"device": "mps" if torch.backends.mps.is_available() else "cpu"})
+            "speechbrain/spkrec-ecapa-voxceleb", run_opts={"device": "cpu"})
     return _ecapa
 
 

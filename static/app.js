@@ -926,11 +926,50 @@ function renderTranscript() {
   });
 }
 
+/** Show the quantity that actually means something for this tag, not a
+ *  normalised score (a [stammers] score is a constant 0.70, a [pauses] score
+ *  is just gap/2s — the seconds are what you can judge by ear). */
+function chipLabel(c) {
+  const e = c.evidence || {};
+  if (c.tag === "pauses" && e.gap_s != null) return `${e.gap_s.toFixed(2)}s`;
+  if (c.tag === "hesitates") {
+    if (e.filler) return `"${e.filler}"`;
+    if (e.island) return `${(e.island[1] - e.island[0]).toFixed(2)}s`;
+  }
+  if (c.tag === "stammers") {
+    if (e.repeated) return `"${e.repeated}"`;
+    if (e.island_cluster) return `${e.island_cluster.length}×`;
+  }
+  return c.score.toFixed(2);      // real probabilities/confidences
+}
+
+function chipTitle(c) {
+  const e = c.evidence || {};
+  const parts = [`detector: ${c.detector}`, `score: ${c.score.toFixed(3)}`];
+  if (c.tag === "pauses")
+    parts.push(`${e.gap_s}s of silence between "${e.after_word}" and "${e.before_word}"`);
+  else if (c.tag === "hesitates" && e.filler)
+    parts.push(`filler "${e.filler}" beside a ${e.gap_s}s gap`);
+  else if (c.tag === "hesitates" && e.island)
+    parts.push(`${(e.island[1] - e.island[0]).toFixed(2)}s of speech with no transcript`);
+  else if (c.tag === "stammers" && e.repeated)
+    parts.push(`"${e.repeated}" repeated ${e.join_s}s apart`);
+  else if (e.class_scores)
+    parts.push("class scores: " + JSON.stringify(e.class_scores));
+  else if (e.arousal != null)
+    parts.push(`arousal ${e.arousal} (pctl ${e.pctl_a}) · valence ${e.valence} (pctl ${e.pctl_v})`
+               + (e.weak ? " · WEAK evidence (English-trained model on Hindi)" : ""));
+  else if (e.f0_std_st != null)
+    parts.push(`pitch variability ${e.f0_std_st} semitones (speaker pctl ${e.pctl_in_speaker ?? e.pctl_std})`);
+  parts.push("click to play ±2s around it");
+  return parts.join("\n");
+}
+
 function makeChip(c, seg) {
   const chip = document.createElement("span");
   chip.className = "chip";
-  chip.textContent = `[${c.tag}] ${c.score.toFixed(2)}`;
-  chip.title = "click to play ±2s around the hit\n" + JSON.stringify(c.evidence);
+  chip.textContent = `[${c.tag}] ${chipLabel(c)}`;
+  chip.title = chipTitle(c);
   chip.onclick = (ev) => { ev.stopPropagation(); playWindow(seg.start + (c.position_s ?? 0)); };
   return chip;
 }

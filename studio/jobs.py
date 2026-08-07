@@ -194,11 +194,14 @@ class JobStore:
                 else:
                     self.set_stage(vid, stage, **fields)
 
+            import time as _time
             try:
                 if is_det:
-                    self.set_detector(vid, det_name, status="running", msg="")
+                    self.set_detector(vid, det_name, status="running", msg="",
+                                      started=_time.time())
                 else:
-                    self.set_stage(vid, stage, status="running", msg="", progress=0.0)
+                    self.set_stage(vid, stage, status="running", msg="",
+                                   progress=0.0, started=_time.time())
                 fn(JOBS_DIR / vid, report)
                 if is_det:
                     self.set_detector(vid, det_name, status="done", msg="")

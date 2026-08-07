@@ -108,6 +108,13 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
   animation: spin .8s linear infinite; }
 
 /* ---------- listen: multitrack ---------- */
+.overlapStrip { margin-bottom: 8px; line-height: 2; }
+.ovchip {
+  padding: 1px 8px; margin: 0 3px 3px 0; border-radius: 999px;
+  font: 11px var(--mono); background: #241f15; border: 1px solid #5e4a1e;
+  color: var(--warn); cursor: pointer;
+}
+.ovchip:hover { border-color: var(--warn); }
 #tracks { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .track { display: grid; grid-template-columns: 168px 1fr; border-bottom: 1px solid var(--line); }
 .track:last-child { border-bottom: none; }

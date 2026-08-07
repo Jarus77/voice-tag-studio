@@ -177,7 +177,33 @@ def get_job(vid: str) -> dict:
     job["detector_names"] = list(DETECTORS)
     job["busy"] = store.busy()
     job["activity"] = store.activity()
+    job["overlaps"] = _overlaps(job_dir)
     return job
+
+
+def _overlaps(job_dir: Path, min_s: float = 0.3, cap: int = 200) -> list[list[float]]:
+    """Regions where >=2 diarized speakers talk at once (sweep line over turns).
+    These are the crosstalk zones the segment stage drops — and the prime
+    targets for SAM span-prompted rescue."""
+    rows = read_jsonl(job_dir / "manifests" / "speakers.jsonl")
+    if not rows:
+        return []
+    events = []
+    for r in rows:
+        for t in r["turns"]:
+            events.append((t["start"], 1))
+            events.append((t["end"], -1))
+    events.sort()
+    out, n, cur = [], 0, None
+    for ts, delta in events:
+        n += delta
+        if n >= 2 and cur is None:
+            cur = ts
+        elif n < 2 and cur is not None:
+            if ts - cur >= min_s:
+                out.append([round(cur, 2), round(ts, 2)])
+            cur = None
+    return out[:cap]
 
 
 @app.post("/api/jobs/{vid}/stages/{stage}")

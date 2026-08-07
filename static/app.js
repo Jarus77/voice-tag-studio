@@ -170,9 +170,11 @@ function renderSepStatus() {
   const btn = $("sepRun");
   if (!d) { el.textContent = ""; return; }
   const busy = d.status === "running" || d.status === "queued";
+  const elapsed = d.status === "running" && d.started
+    ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
   el.className = `detStatus ${d.status}`;
   el.innerHTML = busy
-    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}`
+    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}${elapsed}`
     : d.status === "error" ? `✗ ${d.msg || "failed"}`
     : `✓ ${d.msg || "done"} — new lanes above`;
   btn.disabled = busy;
@@ -377,12 +379,39 @@ function renderTracks() {
       .then((p) => { tr.peaks = p; drawAll(); })
       .catch(() => {});
   });
+  renderOverlaps();
   // transport clock: muted original drives scrubber/duration/events
   const first = sources[0];
   if (!player.src) { player.src = first.path; player.load(); }
   if (!state.mix.size || ![...state.mix].some((n) => state.tracks.has(n)))
     setMix(new Set([first.name]));
   else refreshLaneStyles();
+}
+
+function renderOverlaps() {
+  const el = $("overlapStrip");
+  const ov = state.job.overlaps || [];
+  if (!ov.length) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  if (el.dataset.n == ov.length) return;   // unchanged
+  el.dataset.n = ov.length;
+  el.innerHTML =
+    `<span class="hint">⚠ ${ov.length} overlap region${ov.length > 1 ? "s" : ""} ` +
+    `(both speakers at once — dropped from the dataset; click to jump, then ⧉ a speaker to rescue via SAM):</span> ` +
+    ov.slice(0, 60).map(([a, b]) =>
+      `<button class="ovchip" data-a="${a}" data-b="${b}">${fmtT(a)}·${(b - a).toFixed(1)}s</button>`
+    ).join("") + (ov.length > 60 ? ` <span class="hint">+${ov.length - 60} more</span>` : "");
+  el.querySelectorAll(".ovchip").forEach((btn) => {
+    btn.onclick = () => {
+      const a = parseFloat(btn.dataset.a), b = parseFloat(btn.dataset.b);
+      // center the overlap in a 10s isolate window + seek just before it
+      const dur = parseFloat($("sepDur").value || "10");
+      $("sepStart").value = Math.max(0, a - Math.max(0, (dur - (b - a)) / 2)).toFixed(1);
+      state.playStopAt = b + 1;
+      player.currentTime = Math.max(0, a - 1);
+      player.play().catch(() => {});
+    };
+  });
 }
 
 /* ---- lane mixing: the muted transport <audio> is the clock; every unmuted
@@ -478,6 +507,12 @@ function drawTrack(tr, name, segById) {
     ctx.fillRect(i * bw, Math.min(y0, y1), Math.max(1, bw * 0.8), Math.abs(y1 - y0) || 1);
   });
   const dur = tr.peaks.duration;
+  // overlap shading (amber strip along the bottom)
+  ctx.fillStyle = "#f0b13c55";
+  (state.job.overlaps || []).forEach(([a, b]) => {
+    const x0 = (a / dur) * W, x1 = (b / dur) * W;
+    ctx.fillRect(x0, H - 4 * devicePixelRatio, Math.max(1.5, x1 - x0), 4 * devicePixelRatio);
+  });
   state.candidates.forEach((c) => {
     const seg = segById[c.seg_id];
     if (!seg || c.position_s == null) return;

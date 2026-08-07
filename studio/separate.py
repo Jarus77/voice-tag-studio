@@ -21,6 +21,26 @@ MAX_DUR_S = 30.0   # SAM-Audio works best near 10 s (its training length)
 WINDOW_S = 10.0    # full-audio sweeps use this window
 
 
+REMOTE_TIMEOUT_S = 600   # a 10s window should never take 10 minutes
+
+
+def _remote_with_timeout(sep, wav_bytes, prompt, model, reranking, anchors):
+    """spawn + bounded get: a wedged Modal call (dead container, GPU capacity
+    contention) fails loudly instead of hanging the runner forever."""
+    call = sep.separate.spawn(wav_bytes, prompt, model_name=model,
+                              reranking=reranking, anchors=anchors)
+    try:
+        return call.get(timeout=REMOTE_TIMEOUT_S)
+    except TimeoutError:
+        try:
+            call.cancel()
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"SAM call timed out after {REMOTE_TIMEOUT_S}s — Modal container "
+            "not starting (GPU capacity busy in workspace?) — retry later")
+
+
 def _decode_16k(wav_bytes: bytes):
     import io
 
@@ -109,9 +129,9 @@ def run_sam_speaker_full(job_dir: Path, report, speaker: str,
                  "-i", str(next(job_dir.glob("master.*"), original)),
                  "-ac", "1", str(chunk)], check=True)
             anchors = speaker_anchors(job_dir, speaker, a, b - a)
-            out = sep.separate.remote(chunk.read_bytes(), "speech",
-                                      model_name=model, reranking=reranking,
-                                      anchors=anchors)
+            out = _remote_with_timeout(
+                sep, chunk.read_bytes(), "speech", model=model,
+                reranking=reranking, anchors=anchors)
             y = _decode_16k(out["target"])
             i0, i1 = int(a * 16000), min(len(track), int(b * 16000))
             track[i0:i1] = y[: i1 - i0]
@@ -191,9 +211,9 @@ def run_sam(job_dir: Path, report, prompt: str, start: float, dur: float,
     report(f"SAM-Audio on Modal GPU: {prompt!r}", 0.15)
     import modal
     Separator = modal.Cls.from_name(MODAL_APP, "Separator")
-    out = Separator().separate.remote(
-        chunk.read_bytes(), prompt, model_name=model, reranking=reranking,
-        anchors=anchors)
+    out = _remote_with_timeout(
+        Separator(), chunk.read_bytes(), prompt, model=model,
+        reranking=reranking, anchors=anchors)
     chunk.unlink(missing_ok=True)
 
     report("writing timeline-aligned lanes", 0.85)

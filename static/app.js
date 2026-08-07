@@ -806,7 +806,27 @@ function renderTranscript() {
           if (k < al.words.length && al.words[k].w === tok) timed[i] = al.words[k++];
         });
       }
+      // Place each positioned tag at its true spot in the word stream.
+      // [pauses]/[hesitates] live in the GAPS between words, so "inside a
+      // word span" was the wrong test — insert before the first word that
+      // starts after the tag's timestamp.
+      const chipsAt = {};
+      const placeIdx = (pos) => {
+        for (let i = 0; i < tokens.length; i++)
+          if (timed[i] && timed[i].start > pos) return i;
+        return tokens.length;
+      };
+      cands.forEach((c) => {
+        if (c.position_s == null) return;   // utterance-level -> end
+        const i = placeIdx(c.position_s);
+        (chipsAt[i] = chipsAt[i] || []).push(c);
+      });
+
+      const emitChips = (i) =>
+        (chipsAt[i] || []).forEach((c) => text.appendChild(makeChip(c, seg)));
+
       tokens.forEach((tok, i) => {
+        emitChips(i);
         const w = timed[i];
         const span = document.createElement("span");
         const esc = tok.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -829,11 +849,8 @@ function renderTranscript() {
           `${w.start.toFixed(2)}–${w.end.toFixed(2)}`;
         span.onclick = (ev) => { ev.stopPropagation(); seekPlay(abs); };
         text.appendChild(span);
-        cands.forEach((c) => {
-          if (c.position_s != null && c.position_s >= w.start && c.position_s <= w.end)
-            text.appendChild(makeChip(c, seg));
-        });
       });
+      emitChips(tokens.length);      // tags after the last word
     } else if (tr?.text) {
       text.textContent = tr.text;
     } else if (tr?.error) {
@@ -845,10 +862,12 @@ function renderTranscript() {
          : st === "running" ? "asr is running…"
          : `click the <b>asr</b> step to transcribe (${st})`) + `</span>`;
     }
+    // utterance-level tags (no timestamp: tones, states, whispers) and every
+    // tag on clips that have no alignment yet
+    const positioned = al?.words?.length && tr?.text;
     cands.forEach((c) => {
-      const placed = al?.words?.some((w) =>
-        c.position_s != null && c.position_s >= w.start && c.position_s <= w.end);
-      if (!placed) text.appendChild(makeChip(c, seg));
+      if (positioned && c.position_s != null) return;   // already placed inline
+      text.appendChild(makeChip(c, seg));
     });
     // script-mix indicator: catches an ASR drifting to all-Devanagari
     if (tr?.script && tr.script.chars > 8) {

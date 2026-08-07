@@ -70,11 +70,13 @@ def acoustic_overlaps(wav: Path, device: str = "cpu") -> list[tuple]:
     global _seg_inference
     from .intervals import merge_close
     if _seg_inference is None:
+        import torch
         from huggingface_hub import get_token
         from pyannote.audio import Inference, Model
         seg = Model.from_pretrained("pyannote/segmentation-3.0",
                                     use_auth_token=get_token())
-        _seg_inference = Inference(seg, duration=10.0, step=10.0, device=device)
+        _seg_inference = Inference(seg, duration=10.0, step=10.0,
+                                   device=torch.device(device))
     out = _seg_inference(str(wav))
     data = np.asarray(out.data)
     if data.ndim == 2:

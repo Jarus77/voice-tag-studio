@@ -41,47 +41,11 @@
 <section class="card hidden" id="listenSec">
   <div class="cardHead">
     <h2>Listen</h2>
-    <span class="hint">🔊 = lane plays (mix several) · click a <b>waveform</b> to solo that lane from that point · ◆ = tag hit</span>
+    <span class="hint">🔊 = lane plays (mix several) · click a <b>waveform</b> to solo that lane from that point · <b>clean</b> on a speaker lane = SepFormer overlap rescue · ◆ = tag hit</span>
   </div>
   <div id="cleanStatus" class="activity hidden" style="margin:0 0 8px"></div>
   <div id="overlapStrip" class="overlapStrip hidden"></div>
   <div id="tracks"></div>
-</section>
-
-<section class="card hidden" id="sepSec">
-  <div class="cardHead">
-    <h2>Isolate a sound <span class="hint">SAM-Audio on Modal GPU — describe what to pull out (lowercase noun phrase); results appear as new lanes</span></h2>
-  </div>
-  <div class="row" style="flex-wrap:wrap">
-    <input id="sepPrompt" list="sepSuggestions" placeholder='e.g. "man speaking"' style="flex:1;min-width:220px">
-    <datalist id="sepSuggestions">
-      <option value="man speaking"></option>
-      <option value="woman speaking"></option>
-      <option value="speech, single speaker"></option>
-      <option value="audience laughing"></option>
-      <option value="laughter"></option>
-      <option value="music"></option>
-      <option value="crowd noise"></option>
-    </datalist>
-    <label class="hint">start <input id="sepStart" type="number" min="0" step="0.1" value="0" style="width:90px"></label>
-    <button id="sepAtPlayhead" type="button" title="use current playhead position">@playhead</button>
-    <label class="hint">dur <input id="sepDur" type="number" min="2" max="30" step="1" value="10" style="width:64px"></label>
-    <select id="sepEngine" title="separation engine for ⧉ clean-lane builds — lanes are engine-suffixed so you can build BOTH and A/B them">
-      <option value="sepformer">engine: SepFormer (local, free)</option>
-      <option value="sam">engine: SAM (Modal GPU)</option>
-    </select>
-    <select id="sepModel">
-      <option value="facebook/sam-audio-base">base (fast)</option>
-      <option value="facebook/sam-audio-large">large (best)</option>
-    </select>
-    <select id="sepRerank" title="candidates re-ranked for quality (slower)">
-      <option value="1">rerank ×1</option>
-      <option value="4">rerank ×4</option>
-      <option value="8">rerank ×8</option>
-    </select>
-    <button id="sepRun">Isolate</button>
-    <span id="sepStatus" class="detStatus"></span>
-  </div>
 </section>
 
 <section class="card hidden" id="bakeoffSec">
@@ -129,6 +93,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=20"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>

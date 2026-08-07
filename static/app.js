@@ -116,94 +116,37 @@ $("runRemaining").addEventListener("click", async () => {
   poll();
 });
 
-/* ---------------- SAM-Audio isolate panel ---------------- */
+/* ---------------- clean-lane builds (SepFormer overlap rescue) ---------------- */
 
-$("sepAtPlayhead").addEventListener("click", () => {
-  $("sepStart").value = (player.currentTime || 0).toFixed(1);
-});
-$("sepRun").addEventListener("click", async () => {
-  const prompt = $("sepPrompt").value.trim();
-  if (!prompt) { $("sepPrompt").focus(); return; }
-  const btn = $("sepRun");
-  btn.disabled = true; btn.textContent = "Queued…";
-  const r = await fetch(`/api/jobs/${state.vid}/separate`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      start: parseFloat($("sepStart").value || "0"),
-      dur: parseFloat($("sepDur").value || "10"),
-      model: $("sepModel").value,
-      reranking: parseInt($("sepRerank").value, 10),
-    }),
-  });
-  if (!r.ok) {
-    banner("isolate: " + ((await r.json()).detail || r.status));
-    btn.disabled = false; btn.textContent = "Isolate";
-  }
-  poll();
-});
-
-async function isolateSpeaker(speaker, engineOverride) {
-  // diarize->separation span recipe: "+" spans = this speaker's turns,
-  // "-" = other speakers' turns
-  let start = parseFloat($("sepStart").value || "0");
-  if (!start && player.currentTime) {
-    start = Math.max(0, player.currentTime - 5);
-    $("sepStart").value = start.toFixed(1);
-  }
-  const engine = engineOverride || $("sepEngine").value;
+async function isolateSpeaker(speaker) {
   const nOvWin = new Set((state.job.overlaps || []).map(([a]) => Math.floor(a / 10))).size;
-  const full = confirm(
-    `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane with ` +
-    `${engine.toUpperCase()}?\n\n` +
-    `OK  = smart stitch: original where they speak alone, ${engine} at the ` +
-    `~${nOvWin} overlap window${nOvWin === 1 ? "" : "s"}, silence elsewhere ` +
-    `(lane is engine-suffixed — build both engines to A/B)\n` +
-    `Cancel = isolate just the 10s window at start=${start.toFixed(0)}s`);
+  if (!confirm(
+    `Build a CLEAN full-length ${speaker.replace("SPEAKER_", "S")} lane?\n\n` +
+    `Original audio where they speak alone · SepFormer separation at the ` +
+    `~${nOvWin} overlap window${nOvWin === 1 ? "" : "s"} · silence elsewhere.\n\n` +
+    `Runs locally (free). Segment then cuts from this lane and keeps the ` +
+    `rescued overlap seconds.`)) return;
   const r = await fetch(`/api/jobs/${state.vid}/separate`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt: "speech",
-      speaker,
-      full,
-      engine,
-      start,
-      dur: parseFloat($("sepDur").value || "10"),
-      model: $("sepModel").value,
-      reranking: parseInt($("sepRerank").value, 10),
-    }),
+    body: JSON.stringify({ speaker, full: true, engine: "sepformer" }),
   });
-  if (!r.ok) banner("isolate speaker: " + ((await r.json()).detail || r.status));
+  if (!r.ok) banner("clean lane: " + ((await r.json()).detail || r.status));
   poll();
 }
 
 function renderSepStatus() {
   const d = (state.job.detectors || {}).separate;
-  const el = $("sepStatus");
-  const btn = $("sepRun");
   const lane = $("cleanStatus");
   const busy = d && (d.status === "running" || d.status === "queued");
-  // lane-area strip: impossible-to-miss build feedback right above the tracks
   if (busy || (d && d.status === "error")) {
     lane.classList.remove("hidden");
     const elapsed = d.status === "running" && d.started
       ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
     lane.innerHTML = busy
       ? `<span class="icon"></span><span>building clean lane — ${d.msg || d.status}${elapsed}</span>`
-      : `<span>✗ clean-lane build failed: ${d.msg || "unknown"} — click SF/SAM to retry</span>`;
+      : `<span>✗ clean-lane build failed: ${d.msg || "unknown"} — click <b>clean</b> to retry</span>`;
   } else lane.classList.add("hidden");
-  // lane buttons lock while a build runs (one at a time)
   document.querySelectorAll(".samiso").forEach((b) => (b.disabled = !!busy));
-  if (!d) { el.textContent = ""; return; }
-  const elapsed = d.status === "running" && d.started
-    ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
-  el.className = `detStatus ${d.status}`;
-  el.innerHTML = busy
-    ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}${elapsed}`
-    : d.status === "error" ? `✗ ${d.msg || "failed"}`
-    : `✓ ${d.msg || "done"} — new lanes above`;
-  btn.disabled = !!busy;
-  btn.textContent = busy ? "Isolating…" : "Isolate";
 }
 
 // diarizer picker (used when the diarize stage is rerun)
@@ -348,17 +291,13 @@ function laneInfo(name) {
   if (name === "denoised") return { label: "Denoised (demucs)", color: "#4da3ff" };
   let m = name.match(/^sam_(.+)_clean(?:_(\w+))?$/);
   if (m) return { label: `Clean: ${m[1].replace(/_/g, " ")}${m[2] ? " · " + m[2] : ""}`, color: "#ffd166" };
-  m = name.match(/^sam_(.+)_target$/);
-  if (m) return { label: `Isolated: ${m[1].replace(/_/g, " ")}`, color: "#ff7ab0" };
-  m = name.match(/^sam_(.+)_residual$/);
-  if (m) return { label: `Without: ${m[1].replace(/_/g, " ")}`, color: "#7fd1d8" };
   if (name.startsWith("SPEAKER_"))
     return { label: name.replace("SPEAKER_", "S"), color: spkColor(name) };
   return { label: name, color: "#8595a5" };
 }
 
 function renderTracks() {
-  ["listenSec", "sepSec", "transcriptSec", "tagsSec"].forEach((s) => $(s).classList.remove("hidden"));
+  ["listenSec", "transcriptSec", "tagsSec"].forEach((s) => $(s).classList.remove("hidden"));
   const holder = $("tracks");
   const sources = state.job.sources || [];
   if (!sources.length) {
@@ -379,20 +318,17 @@ function renderTracks() {
       `<button class="mute" title="toggle this lane in the mix">🔇</button>` +
       `<span class="lname" style="color:${info.color}">${info.label}</span>` +
       (isSpk
-        ? `<button class="samiso" data-eng="sepformer" title="build clean lane with SepFormer (local, free)">SF</button>` +
-          `<button class="samiso" data-eng="sam" title="build clean lane with SAM-Audio (Modal GPU)">SAM</button>`
+        ? `<button class="samiso" title="build a clean full-length lane for this speaker: original where they speak alone, SepFormer separation at overlap windows, silence elsewhere">clean</button>`
         : "");
     label.querySelector(".mute").onclick = (ev) => {
       ev.stopPropagation();
       toggleLane(s.name);
     };
     if (isSpk)
-      label.querySelectorAll(".samiso").forEach((btn) => {
-        btn.onclick = (ev) => {
-          ev.stopPropagation();
-          isolateSpeaker(s.name, btn.dataset.eng);
-        };
-      });
+      label.querySelector(".samiso").onclick = (ev) => {
+        ev.stopPropagation();
+        isolateSpeaker(s.name);
+      };
     const canvas = document.createElement("canvas");
     canvas.addEventListener("click", (ev) => {
       const tr = state.tracks.get(s.name);

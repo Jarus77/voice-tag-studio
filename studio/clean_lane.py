@@ -3,8 +3,8 @@
     detection   tier 1: sweep over pyannote turns (+0.4s dilation)
                 tier 2: acoustic — segmentation-3.0 frame-level "≥2 speakers"
                 (catches backchannels the diarizer never emitted as turns)
-    eliminate   2 diarized speakers -> SepFormer (local, discriminative, free)
-                else               -> SAM-Audio span-prompted (Modal GPU)
+    eliminate   SepFormer (local, discriminative, free) + embedding-based
+                stream assignment
     stitch      original where solo · separated at suspect windows · silence
                 elsewhere · 20ms crossfades at every paste edge
     verify      ecapa purity scan vs the speaker's own centroid; per-window
@@ -133,23 +133,6 @@ def suspect_regions(job_dir: Path, speaker: str, report) -> tuple:
 
 # ---------------- elimination engines ----------------
 
-def _separate_window_sam(job_dir, speaker, a, b, model, reranking):
-    from .separate import _decode_16k, _remote_with_timeout, speaker_anchors
-    import modal
-    chunk = job_dir / "_sam_chunk.wav"
-    subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.2f}", "-t", f"{b - a:.2f}",
-         "-i", str(next(job_dir.glob("master.*"),
-                        job_dir / "audio" / "original.wav")),
-         "-ac", "1", str(chunk)], check=True)
-    anchors = speaker_anchors(job_dir, speaker, a, b - a)
-    Separator = modal.Cls.from_name("tag-studio-sam-audio", "Separator")
-    out = _remote_with_timeout(Separator(), chunk.read_bytes(), "speech",
-                               model=model, reranking=reranking, anchors=anchors)
-    chunk.unlink(missing_ok=True)
-    return _decode_16k(out["target"])
-
-
 def _spans_audio(x: np.ndarray, spans_rel: list[tuple]) -> np.ndarray | None:
     """Concatenate the given (window-relative) spans of x; None if <0.5s.
     Capped at 10s total — enough for an embedding, bounded CPU."""
@@ -235,8 +218,7 @@ def _paste(track: np.ndarray, y: np.ndarray, i0: int, i1: int) -> None:
 
 
 def build_clean_lane(job_dir: Path, report, speaker: str,
-                     model: str = "facebook/sam-audio-base",
-                     reranking: int = 1, engine: str = "auto") -> list[str]:
+                     engine: str = "sepformer") -> list[str]:
     import soundfile as sf
 
     from .audio import load_audio, render_masked_track
@@ -255,13 +237,9 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
                      | {int((e - 1e-3) // WINDOW_S) for s, e in suspects})
     windows = [(i * WINDOW_S, min((i + 1) * WINDOW_S, total_s)) for i in win_idx]
 
-    if engine == "auto":
-        # SepFormer locked in by ear (user, 2026-08-07) despite SAM's higher
-        # ecapa purity — discriminative masking beats generative re-synthesis
-        # for listening/ASR. SAM stays one click away for 3+ speaker jobs.
-        engine = "sepformer"
-    if engine == "sam":
-        reranking = max(reranking, 4)
+    # SepFormer only (user, 2026-08-07): discriminative masking beat SAM's
+    # generative re-synthesis by ear, and it runs locally for free.
+    engine = "sepformer"
     report(f"{len(suspects)} suspect regions (turns:{n1} acoustic:{n2}) -> "
            f"{engine.upper()} on {len(windows)} windows", 0.06)
 
@@ -280,11 +258,7 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     for i, (a, b) in enumerate(windows):
         my_rel = [(max(s, a) - a, min(e, b) - a) for s, e in my
                   if e > a and s < b]
-        if engine == "sepformer":
-            y, assign_sim = _separate_window_sepformer(audio, a, b, centroid, my_rel)
-        else:
-            y = _separate_window_sam(job_dir, speaker, a, b, model, reranking)
-            assign_sim = None
+        y, assign_sim = _separate_window_sepformer(audio, a, b, centroid, my_rel)
         # paste separated audio ONLY inside the target's turn spans — outside
         # them the lane must stay structurally silent, regardless of engine
         # leakage across the rest of the window

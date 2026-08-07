@@ -157,7 +157,7 @@ def get_job(vid: str) -> dict:
         store.set_field(vid, "title", meta["title"])
         job["title"] = meta["title"]
     # audio sources for the Listen section: original/denoised first, then any
-    # extra full-length tracks dropped in audio/ (e.g. sam_* separations),
+    # extra full-length tracks dropped in audio/ (clean lanes),
     # then per-speaker masked tracks
     sources = []
     seen = set()
@@ -308,43 +308,28 @@ def run_asr_bakeoff(vid: str, body: BakeoffReq) -> dict:
     return {"queued": True}
 
 
-# ---------------- SAM-Audio separation ----------------
+# ---------------- clean-lane separation (SepFormer) ----------------
 
 class SeparateReq(BaseModel):
-    prompt: str = "speech"
-    start: float
-    dur: float = 10.0
-    model: str = "facebook/sam-audio-base"
-    reranking: int = 1
-    speaker: str | None = None   # set -> diarization-span prompting (issue #5)
-    full: bool = False           # speaker set + full -> sweep the whole audio
-    engine: str = "auto"         # auto | sepformer | sam  (clean-lane builds)
+    speaker: str
+    full: bool = True
+    engine: str = "sepformer"
 
 
 @app.post("/api/jobs/{vid}/separate")
 def run_separate(vid: str, body: SeparateReq) -> dict:
-    from studio.separate import run_sam
+    """Build a clean full-length lane for one speaker: original where they
+    speak alone, SepFormer separation at overlap windows, silence elsewhere."""
+    from studio.clean_lane import build_clean_lane
     job_dir = JOBS_DIR / vid
     if not (job_dir / "audio" / "original.wav").exists():
         raise HTTPException(409, "run ingest first")
-    if body.speaker and not (job_dir / "manifests" / "speakers.jsonl").exists():
-        raise HTTPException(409, "run diarize first for speaker isolation")
-    if not body.prompt.strip():
-        raise HTTPException(400, "prompt required")
+    if not (job_dir / "manifests" / "speakers.jsonl").exists():
+        raise HTTPException(409, "run diarize first")
+    spk = body.speaker
 
-    p, s, d, m, rr, spk = (body.prompt.strip(), float(body.start),
-                           float(body.dur), body.model, int(body.reranking),
-                           body.speaker)
-
-    if body.full and spk:
-        from studio.clean_lane import build_clean_lane
-        eng = body.engine
-
-        def fn(dir_: Path, report) -> None:
-            build_clean_lane(dir_, report, spk, model=m, reranking=rr, engine=eng)
-    else:
-        def fn(dir_: Path, report) -> None:
-            run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)
+    def fn(dir_: Path, report) -> None:
+        build_clean_lane(dir_, report, spk)
 
     store.enqueue_detect(vid, "separate", fn)
     return {"queued": True}

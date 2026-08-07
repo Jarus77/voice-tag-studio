@@ -51,10 +51,10 @@
 
 <section class="card hidden" id="bakeoffSec">
   <div class="cardHead">
-    <h2>ASR bake-off <span class="hint">Phase 1 — same segments through every engine · <b>fillers highlighted</b> (उह/हम्म/अं/मतलब/uh/um…) · ∅ = missed · click a row to hear it</span></h2>
+    <h2>ASR bake-off <span class="hint">Phase 1 — compares engines on a <b>sample</b> of existing segments (nothing is re-segmented) · <b>fillers highlighted</b> · ∅ = missed · click a row to hear it</span></h2>
   </div>
   <div class="row">
-    <label class="hint">segments <input id="bakeLimit" type="number" min="3" max="40" value="12" style="width:64px"></label>
+    <label class="hint">sample <input id="bakeLimit" type="number" min="3" max="40" value="12" style="width:64px"> <span id="bakeOf"></span></label>
     <button id="bakeRun">Run bake-off</button>
     <span id="bakeStatus" class="detStatus"></span>
   </div>
@@ -100,6 +100,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>

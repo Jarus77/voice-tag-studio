@@ -931,6 +931,8 @@ $("bakeRun").addEventListener("click", async () => {
 });
 
 function renderBakeStatus() {
+  $("bakeOf").textContent = state.segments.length
+    ? `of ${state.segments.length} segments (evenly spaced across the call)` : "";
   const d = (state.job.detectors || {}).bakeoff;
   const el = $("bakeStatus");
   const btn = $("bakeRun");

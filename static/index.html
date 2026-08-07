@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -41,6 +41,7 @@
     <h2>Listen</h2>
     <span class="hint">🔊 = lane plays (mix several) · click a <b>waveform</b> to solo that lane from that point · ◆ = tag hit</span>
   </div>
+  <div id="cleanStatus" class="activity hidden" style="margin:0 0 8px"></div>
   <div id="overlapStrip" class="overlapStrip hidden"></div>
   <div id="tracks"></div>
 </section>
@@ -113,6 +114,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

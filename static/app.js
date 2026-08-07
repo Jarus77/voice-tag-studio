@@ -179,8 +179,20 @@ function renderSepStatus() {
   const d = (state.job.detectors || {}).separate;
   const el = $("sepStatus");
   const btn = $("sepRun");
+  const lane = $("cleanStatus");
+  const busy = d && (d.status === "running" || d.status === "queued");
+  // lane-area strip: impossible-to-miss build feedback right above the tracks
+  if (busy || (d && d.status === "error")) {
+    lane.classList.remove("hidden");
+    const elapsed = d.status === "running" && d.started
+      ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
+    lane.innerHTML = busy
+      ? `<span class="icon"></span><span>building clean lane — ${d.msg || d.status}${elapsed}</span>`
+      : `<span>✗ clean-lane build failed: ${d.msg || "unknown"} — click SF/SAM to retry</span>`;
+  } else lane.classList.add("hidden");
+  // lane buttons lock while a build runs (one at a time)
+  document.querySelectorAll(".samiso").forEach((b) => (b.disabled = !!busy));
   if (!d) { el.textContent = ""; return; }
-  const busy = d.status === "running" || d.status === "queued";
   const elapsed = d.status === "running" && d.started
     ? ` · ${Math.max(0, Math.round(Date.now() / 1000 - d.started))}s` : "";
   el.className = `detStatus ${d.status}`;
@@ -188,7 +200,7 @@ function renderSepStatus() {
     ? `<span class="icon"></span> ${d.status}${d.msg ? " — " + d.msg : ""}${elapsed}`
     : d.status === "error" ? `✗ ${d.msg || "failed"}`
     : `✓ ${d.msg || "done"} — new lanes above`;
-  btn.disabled = busy;
+  btn.disabled = !!busy;
   btn.textContent = busy ? "Isolating…" : "Isolate";
 }
 

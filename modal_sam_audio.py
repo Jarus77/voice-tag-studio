@@ -48,19 +48,25 @@ hf_secret = modal.Secret.from_name("huggingface-token")
     scaledown_window=120,
 )
 class Separator:
-    model_name: str = modal.parameter(default="facebook/sam-audio-base")
-
     @modal.enter()
-    def load(self) -> None:
-        from sam_audio import SAMAudio, SAMAudioProcessor
+    def setup(self) -> None:
+        self._loaded: dict = {}
 
-        self.model = SAMAudio.from_pretrained(self.model_name).eval().cuda()
-        self.processor = SAMAudioProcessor.from_pretrained(self.model_name)
-        cache_vol.commit()
+    def _get(self, model_name: str):
+        if model_name not in self._loaded:
+            from sam_audio import SAMAudio, SAMAudioProcessor
+
+            model = SAMAudio.from_pretrained(model_name).eval().cuda()
+            processor = SAMAudioProcessor.from_pretrained(model_name)
+            self._loaded[model_name] = (model, processor)
+            cache_vol.commit()
+        return self._loaded[model_name]
 
     @modal.method()
     def separate(self, wav_bytes: bytes, description: str,
+                 model_name: str = "facebook/sam-audio-base",
                  reranking: int = 1, predict_spans: bool = False) -> dict:
+        self.model, self.processor = self._get(model_name)
         import io
         import tempfile
 
@@ -113,8 +119,9 @@ def main(job: str, start: float = 900.0, dur: float = 60.0,
          "-i", str(master), "-ac", "1", str(chunk)], check=True)
 
     print(f"separating {dur:.0f}s @ {start:.0f}s with {model!r}, prompt={prompt!r} ...")
-    sep = Separator(model_name=model)
-    out = sep.separate.remote(chunk.read_bytes(), prompt, reranking=reranking)
+    sep = Separator()
+    out = sep.separate.remote(chunk.read_bytes(), prompt,
+                              model_name=model, reranking=reranking)
     chunk.unlink()
 
     # place results on the full job timeline (silence elsewhere) so the UI's

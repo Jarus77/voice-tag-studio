@@ -195,6 +195,14 @@ def get_job(vid: str) -> dict:
     job["busy"] = store.busy()
     job["activity"] = store.activity()
     job["overlaps"] = _overlaps(job_dir)
+    # manifest mtimes let the UI notice a re-run and refetch (otherwise it
+    # keeps showing the data it loaded the first time the stage finished)
+    mt = {}
+    md = job_dir / "manifests"
+    if md.exists():
+        for f in md.glob("*.json*"):
+            mt[f.name] = int(f.stat().st_mtime)
+    job["manifest_mtimes"] = mt
     return job
 
 

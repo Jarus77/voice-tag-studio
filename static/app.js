@@ -614,39 +614,47 @@ function drawTrack(tr, name, segById) {
 
 async function loadManifests() {
   const st = state.job.stages;
+  const mt = state.job.manifest_mtimes || {};
   const get = async (name) => {
     const r = await fetch(`/api/jobs/${state.vid}/manifests/${name}`);
     return r.ok ? r.json() : null;
   };
+  // refetch whenever a manifest's mtime changes (i.e. its stage was re-run)
+  const stale = (file, key) =>
+    state.loaded[key] !== (mt[file] ?? null);
+  const mark = (file, key) => (state.loaded[key] = mt[file] ?? null);
+
   let dirty = false;
-  if (st.segment?.status === "done" && !state.loaded.segments) {
+  if (st.segment?.status === "done" && stale("segments.jsonl", "segments")) {
     state.segments = (await get("segments.jsonl")) || [];
-    state.loaded.segments = true; dirty = true;
+    mark("segments.jsonl", "segments"); dirty = true;
   }
-  if (st.asr?.status === "done" && !state.loaded.transcripts) {
+  if (st.asr?.status === "done" && stale("transcripts.jsonl", "transcripts")) {
     const rows = (await get("transcripts.jsonl")) || [];
     state.transcripts = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
-    state.loaded.transcripts = true; dirty = true;
+    mark("transcripts.jsonl", "transcripts"); dirty = true;
   }
-  if (st.align?.status === "done" && !state.loaded.alignments) {
+  if (st.align?.status === "done" && stale("alignments.jsonl", "alignments")) {
     const rows = (await get("alignments.jsonl")) || [];
     state.alignments = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
-    state.loaded.alignments = true; dirty = true;
+    mark("alignments.jsonl", "alignments"); dirty = true;
   }
   if (st.segment?.status === "done") $("bakeoffSec").classList.remove("hidden");
-  if ((state.job.detectors || {}).bakeoff?.status === "done" && !state.loaded.bakeoff) {
+  if ((state.job.detectors || {}).bakeoff?.status === "done"
+      && stale("asr_bakeoff.jsonl", "bakeoff")) {
     const rows = await get("asr_bakeoff.jsonl");
-    if (rows) { renderBakeoff(rows); state.loaded.bakeoff = true; }
+    if (rows) { renderBakeoff(rows); mark("asr_bakeoff.jsonl", "bakeoff"); }
   }
   const dets = state.job.detectors || {};
   for (const [name, d] of Object.entries(dets)) {
-    if (name === "bakeoff") continue;
-    if (d.status === "done" && !state.loaded["cand_" + name]) {
+    if (name === "bakeoff" || name === "separate") continue;
+    const file = `candidates_${name}.jsonl`;
+    if (d.status === "done" && stale(file, "cand_" + name)) {
       state.candidates = state.candidates
         .filter((c) => c.detector_name !== name)
-        .concat(((await get(`candidates_${name}.jsonl`)) || [])
+        .concat(((await get(file)) || [])
           .map((c) => ({ ...c, detector_name: name })));
-      state.loaded["cand_" + name] = true; dirty = true;
+      mark(file, "cand_" + name); dirty = true;
       renderHits();
     }
   }
@@ -928,7 +936,7 @@ const BAKE_ENGINES = ["srota", "sarvam", "gemini"];
 $("bakeRun").addEventListener("click", async () => {
   const btn = $("bakeRun");
   btn.disabled = true; btn.textContent = "Running…";
-  state.loaded.bakeoff = false;
+  state.loaded.bakeoff = -1;
   const r = await fetch(`/api/jobs/${state.vid}/bakeoff`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ limit: parseInt($("bakeLimit").value, 10) || 12 }),
@@ -1031,7 +1039,7 @@ $("detRun").addEventListener("click", async () => {
   if (!det) return;
   const btn = $("detRun");
   btn.disabled = true; btn.textContent = "Running…";
-  state.loaded["cand_" + det] = false;
+  state.loaded["cand_" + det] = -1;
   const r = await fetch(`/api/jobs/${state.vid}/detect`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ detector: det }),

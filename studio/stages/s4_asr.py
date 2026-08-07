@@ -114,9 +114,13 @@ def _run_gemini_all(job_dir: Path, segments: list[dict], report) -> None:
 
     def one(s: dict) -> dict:
         r = _gemini_transcribe(job_dir / s["wav"])
-        if r.get("error"):          # one retry on transient API errors
+        # retry on transient errors AND on an empty result (a silent empty
+        # response is indistinguishable from "clip has no speech" downstream)
+        if r.get("error") or not (r.get("text") or "").strip():
             time.sleep(2)
-            r = _gemini_transcribe(job_dir / s["wav"])
+            r2 = _gemini_transcribe(job_dir / s["wav"])
+            if (r2.get("text") or "").strip() or not r.get("text"):
+                r = r2
         text = (r.get("text") or "").strip()
         return {
             "seg_id": s["seg_id"],

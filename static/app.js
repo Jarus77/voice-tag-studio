@@ -143,17 +143,24 @@ $("sepRun").addEventListener("click", async () => {
 
 async function isolateSpeaker(speaker) {
   // diarize->SAM span prompting (sam-audio issue #5 recipe): "+" spans =
-  // this speaker's turns in the window, "-" = other speakers' turns
+  // this speaker's turns, "-" = other speakers' turns
   let start = parseFloat($("sepStart").value || "0");
   if (!start && player.currentTime) {
     start = Math.max(0, player.currentTime - 5);
     $("sepStart").value = start.toFixed(1);
   }
+  const durTotal = state.tracks.get("original")?.peaks?.duration || 0;
+  const nWin = Math.ceil(durTotal / 10);
+  const full = confirm(
+    `Isolate ${speaker.replace("SPEAKER_", "S")} across the WHOLE audio?\n\n` +
+    `OK  = full sweep (~${nWin} × 10s windows on the GPU — continuous end-to-end lane)\n` +
+    `Cancel = just the 10s window at start=${start.toFixed(0)}s`);
   const r = await fetch(`/api/jobs/${state.vid}/separate`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt: "speech",
       speaker,
+      full,
       start,
       dur: parseFloat($("sepDur").value || "10"),
       model: $("sepModel").value,

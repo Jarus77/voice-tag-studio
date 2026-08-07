@@ -293,6 +293,7 @@ class SeparateReq(BaseModel):
     model: str = "facebook/sam-audio-base"
     reranking: int = 1
     speaker: str | None = None   # set -> diarization-span prompting (issue #5)
+    full: bool = False           # speaker set + full -> sweep the whole audio
 
 
 @app.post("/api/jobs/{vid}/separate")
@@ -310,8 +311,14 @@ def run_separate(vid: str, body: SeparateReq) -> dict:
                            float(body.dur), body.model, int(body.reranking),
                            body.speaker)
 
-    def fn(dir_: Path, report) -> None:
-        run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)
+    if body.full and spk:
+        from studio.separate import run_sam_speaker_full
+
+        def fn(dir_: Path, report) -> None:
+            run_sam_speaker_full(dir_, report, spk, model=m, reranking=rr)
+    else:
+        def fn(dir_: Path, report) -> None:
+            run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)
 
     store.enqueue_detect(vid, "separate", fn)
     return {"queued": True}

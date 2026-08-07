@@ -18,6 +18,96 @@ from pathlib import Path
 
 MODAL_APP = "tag-studio-sam-audio"
 MAX_DUR_S = 30.0   # SAM-Audio works best near 10 s (its training length)
+WINDOW_S = 10.0    # full-audio sweeps use this window
+
+
+def _decode_16k(wav_bytes: bytes):
+    import io
+
+    import numpy as np
+    import soundfile as sf
+    from scipy.signal import resample_poly
+    from math import gcd
+
+    data, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    g = gcd(16000, sr)
+    return resample_poly(data, 16000 // g, sr // g).astype(np.float32)
+
+
+def run_sam_speaker_full(job_dir: Path, report, speaker: str,
+                         model: str = "facebook/sam-audio-base",
+                         reranking: int = 1) -> list[str]:
+    """Isolate one speaker across the ENTIRE audio: sweep 10s windows,
+    span-prompt each window where the speaker talks, stitch a continuous
+    full-length Isolated/Without lane pair.
+
+    Windows without the speaker are skipped (target stays silent there;
+    residual keeps the original audio — nothing to remove)."""
+    import json
+
+    import numpy as np
+    import soundfile as sf
+
+    from .audio import load_audio
+
+    original = job_dir / "audio" / "original.wav"
+    audio = load_audio(original, 16000)
+    total_s = len(audio) / 16000
+
+    rows = [json.loads(l) for l in
+            (job_dir / "manifests" / "speakers.jsonl").read_text().splitlines() if l.strip()]
+    turns = next((r["turns"] for r in rows if r["speaker"] == speaker), None)
+    if not turns:
+        raise RuntimeError(f"unknown speaker {speaker}")
+
+    windows = []
+    t = 0.0
+    while t < total_s:
+        a, b = t, min(t + WINDOW_S, total_s)
+        active = sum(min(tr["end"], b) - max(tr["start"], a)
+                     for tr in turns if tr["end"] > a and tr["start"] < b)
+        if active >= 0.3:
+            windows.append((a, b))
+        t += WINDOW_S
+    if not windows:
+        raise RuntimeError(f"{speaker} never speaks?")
+
+    report(f"{len(windows)} windows of {WINDOW_S:.0f}s to isolate", 0.02)
+    import modal
+    Separator = modal.Cls.from_name(MODAL_APP, "Separator")
+    sep = Separator()
+
+    target_track = np.zeros(len(audio), dtype=np.float32)
+    residual_track = audio.copy()   # untouched windows keep the original
+    chunk = job_dir / "_sam_chunk.wav"
+    for i, (a, b) in enumerate(windows):
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-ss", f"{a:.2f}", "-t", f"{b - a:.2f}",
+             "-i", str(next(job_dir.glob("master.*"), original)),
+             "-ac", "1", str(chunk)], check=True)
+        anchors = speaker_anchors(job_dir, speaker, a, b - a)
+        out = sep.separate.remote(chunk.read_bytes(), "speech",
+                                  model_name=model, reranking=reranking,
+                                  anchors=anchors)
+        i0, i1 = int(a * 16000), min(len(audio), int(b * 16000))
+        for kind, track in (("target", target_track), ("residual", residual_track)):
+            y = _decode_16k(out[kind])
+            track[i0:i1] = y[: i1 - i0]
+        report(f"window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s)",
+               0.02 + 0.95 * (i + 1) / len(windows))
+    chunk.unlink(missing_ok=True)
+
+    slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower())
+    written = []
+    for kind, track in (("target", target_track), ("residual", residual_track)):
+        name = f"sam_{slug}_full_{kind}"
+        sf.write(job_dir / "audio" / f"{name}.wav", track, 16000, subtype="PCM_16")
+        (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
+        written.append(name)
+    report(f"full-length lanes ready: {', '.join(written)}", 1.0)
+    return written
 
 
 def speaker_anchors(job_dir: Path, speaker: str, start: float,

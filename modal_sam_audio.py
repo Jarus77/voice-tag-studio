@@ -41,7 +41,9 @@ image = (
 
 app = modal.App(APP_NAME, image=image)
 cache_vol = modal.Volume.from_name("voice-hf-cache", create_if_missing=True)
-hf_secret = modal.Secret.from_name("huggingface-token")
+# suraj's personal token (accepted the sam-audio gate); the shared
+# workspace "huggingface-token" secret is not authorized for it
+hf_secret = modal.Secret.from_name("hf-token-suraj-gated")
 
 
 @app.cls(

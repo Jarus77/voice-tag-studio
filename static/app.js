@@ -689,6 +689,16 @@ function renderTranscript() {
       chip.textContent = ">20s";
       text.appendChild(chip);
     }
+    if (seg.separated) {
+      const chip = document.createElement("span");
+      chip.className = "chip status";
+      chip.style.borderColor = "#ffd166";
+      chip.style.color = "#ffd166";
+      chip.textContent = "rescued";
+      chip.title = `contains separated overlap audio (${seg.source}) — ` +
+        `purity-gated; flagged for dataset filtering`;
+      text.appendChild(chip);
+    }
     row.appendChild(text);
     row.onclick = () => seekPlay(seg.start);
     el.appendChild(row);

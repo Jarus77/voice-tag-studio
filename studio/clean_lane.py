@@ -250,7 +250,11 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     windows = [(i * WINDOW_S, min((i + 1) * WINDOW_S, total_s)) for i in win_idx]
 
     if engine == "auto":
-        engine = "sepformer" if n_speakers == 2 else "sam"
+        # measured on telephony 2026-08-07: SAM rerank>=4 beat SepFormer on
+        # every window (0.75-0.81 vs 0.64-0.69 purity) — SAM is the default
+        engine = "sam"
+    if engine == "sam":
+        reranking = max(reranking, 4)
     report(f"{len(suspects)} suspect regions (turns:{n1} acoustic:{n2}) -> "
            f"{engine.upper()} on {len(windows)} windows", 0.06)
 

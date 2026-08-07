@@ -278,8 +278,16 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
         else:
             y = _separate_window_sam(job_dir, speaker, a, b, model, reranking)
             assign_sim = None
-        i0, i1 = int(a * 16000), min(len(track), int(b * 16000))
-        _paste(track, y, i0, i1)
+        # paste separated audio ONLY inside the target's turn spans — outside
+        # them the lane must stay structurally silent, regardless of engine
+        # leakage across the rest of the window
+        base = int(a * 16000)
+        for s, e in my_rel:
+            s = max(0.0, s - 0.1)
+            e = min(b - a, e + 0.1)
+            j0, j1 = int(s * 16000), int(e * 16000)
+            if j1 > j0 and base + j0 < len(track):
+                _paste(track, y[j0:j1], base + j0, min(len(track), base + j1))
         p = purity_of(track, a, b, centroid, my_rel)
         purity["windows"].append({
             "start": round(a, 1), "end": round(b, 1),

@@ -17,7 +17,7 @@ from .config import ASR_MODEL, ASR_VENV_PY, ASR_WORKER, load_env
 from .manifests import read_jsonl, write_jsonl
 from .stages.s4_asr import sarvam_transcribe
 
-ENGINES = ["srota", "sarvam", "whisper", "gemini"]
+ENGINES = ["srota", "sarvam", "gemini"]   # whisper dropped by user's call
 
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_PROMPT = (
@@ -28,23 +28,6 @@ GEMINI_PROMPT = (
     "and incomplete words — do NOT clean anything up. "
     "Output ONLY the transcript text, nothing else."
 )
-
-_whisper = None
-
-
-def _get_whisper():
-    global _whisper
-    if _whisper is None:
-        import torch
-        from transformers import pipeline
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        _whisper = pipeline(
-            "automatic-speech-recognition",
-            model="openai/whisper-large-v3",
-            dtype=torch.float16 if device == "mps" else torch.float32,
-            device=device)
-    return _whisper
-
 
 def _run_srota(job_dir: Path, segs: list[dict], report) -> dict[str, dict]:
     batch = job_dir / "_bakeoff_batch.json"
@@ -118,33 +101,13 @@ def run_bakeoff(job_dir: Path, report, limit: int = 12) -> None:
             "text": (r.get("text") or "").strip(), "error": r.get("error")}
         report(f"sarvam {i + 1}/{len(segments)}", 0.3 + 0.15 * (i + 1) / len(segments))
 
-    # whisper-large-v3 (local MPS)
-    report("loading whisper-large-v3", 0.45)
-    try:
-        wh = _get_whisper()
-        for i, s in enumerate(segments):
-            try:
-                out = wh(str(job_dir / s["wav"]),
-                         generate_kwargs={"language": "hindi", "task": "transcribe"})
-                results[s["seg_id"]]["engines"]["whisper"] = {
-                    "text": (out.get("text") or "").strip(), "error": None}
-            except Exception as e:
-                results[s["seg_id"]]["engines"]["whisper"] = {
-                    "text": "", "error": f"{type(e).__name__}: {str(e)[:100]}"}
-            report(f"whisper {i + 1}/{len(segments)}",
-                   0.45 + 0.3 * (i + 1) / len(segments))
-    except Exception as e:
-        for s in segments:
-            results[s["seg_id"]]["engines"]["whisper"] = {
-                "text": "", "error": f"load failed: {str(e)[:100]}"}
-
     # gemini (verbatim-prompted)
     for i, s in enumerate(segments):
         r = _gemini_transcribe(job_dir / s["wav"])
         results[s["seg_id"]]["engines"]["gemini"] = {
             "text": (r.get("text") or "").strip(), "error": r.get("error")}
         report(f"gemini {i + 1}/{len(segments)}",
-               0.75 + 0.2 * (i + 1) / len(segments))
+               0.5 + 0.45 * (i + 1) / len(segments))
 
     rows = [results[s["seg_id"]] for s in segments]
     write_jsonl(job_dir / "manifests" / "asr_bakeoff.jsonl", rows)

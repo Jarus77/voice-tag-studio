@@ -719,7 +719,7 @@ function playWindow(t) {
 /* ---------------- ASR bake-off (Phase 1) ---------------- */
 
 const FILLER_RE = /(उह+|हम्+म?|अं+|अच्छा|मतलब|यानी|हाँ|\b(?:uh+|um+|hmm+|haan|like)\b)/gi;
-const BAKE_ENGINES = ["srota", "sarvam", "whisper", "gemini"];
+const BAKE_ENGINES = ["srota", "sarvam", "gemini"];
 
 $("bakeRun").addEventListener("click", async () => {
   const btn = $("bakeRun");

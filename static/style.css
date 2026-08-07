@@ -164,6 +164,12 @@ button.primary { background: #1c3a5e; border-color: #2d5c94; }
 .seg .segplay { padding: 1px 9px; font-size: 11px; }
 .seg .text { word-break: break-word; font-size: 15px; line-height: 1.9; }
 .w.now { background: var(--acc); color: #0d1117; border-radius: 3px; }
+.legend { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 10px;
+  font-size: 11.5px; color: var(--dim); }
+.legend b { font-weight: 500; border-radius: 999px; padding: 0 7px;
+  font-family: var(--mono); font-size: 10.5px; }
+.lg-resc { border: 1px solid #ffd166; color: #ffd166; }
+.lg-imp { border: 1px solid var(--err); color: var(--err); }
 .w { cursor: pointer; border-radius: 3px; }
 .w:hover { background: #23405c; }
 .w .wt { font: 9px var(--mono); color: var(--dim); vertical-align: sub; margin-left: 1px; }

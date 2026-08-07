@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=23">
+<link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
 
@@ -66,6 +66,11 @@
     <span id="transcriptBadge" class="badge"></span>
     <span class="hint">each clip: waveform + words · ▶ plays just that clip · words highlight as it plays · click a word to jump</span>
     <label class="hint" style="margin-left:auto"><input type="checkbox" id="showWordTimes" style="vertical-align:-2px"> show word times</label>
+  </div>
+  <div class="legend">
+    <span><b class="lg-resc">rescued</b> = includes overlap audio recovered by SepFormer (reconstructed — filterable from training)</span>
+    <span><b class="lg-imp">impure 0.54</b> = voice match to this speaker's own voiceprint is below 0.55 — listen: crosstalk, wrong speaker, or a false alarm</span>
+    <span><b class="lg-imp">✂ start/end</b> = the first/last word runs into the clip edge — probably cut in half</span>
   </div>
   <div id="transcriptEmpty" class="empty"></div>
   <div id="transcript"></div>

@@ -312,10 +312,10 @@ def run_separate(vid: str, body: SeparateReq) -> dict:
                            body.speaker)
 
     if body.full and spk:
-        from studio.separate import run_sam_speaker_full
+        from studio.clean_lane import build_clean_lane
 
         def fn(dir_: Path, report) -> None:
-            run_sam_speaker_full(dir_, report, spk, model=m, reranking=rr)
+            build_clean_lane(dir_, report, spk, model=m, reranking=rr)
     else:
         def fn(dir_: Path, report) -> None:
             run_sam(dir_, report, p, s, d, model=m, reranking=rr, speaker=spk)

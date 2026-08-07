@@ -108,24 +108,34 @@ def _run_gemini_all(job_dir: Path, segments: list[dict], report) -> None:
     if not os.environ.get("GEMINI_API_KEY"):
         raise RuntimeError("GEMINI_API_KEY missing — add it to .env "
                            "(or rerun with ?engine=srota)")
+    from concurrent.futures import ThreadPoolExecutor
+
     from ..asr_bakeoff import _gemini_transcribe
-    rows = []
-    for i, s in enumerate(segments):
+
+    def one(s: dict) -> dict:
         r = _gemini_transcribe(job_dir / s["wav"])
         if r.get("error"):          # one retry on transient API errors
             time.sleep(2)
             r = _gemini_transcribe(job_dir / s["wav"])
         text = (r.get("text") or "").strip()
-        rows.append({
+        return {
             "seg_id": s["seg_id"],
             "text": text,
             "asr": "gemini:verbatim",
             "language": "",
             "script": script_profile(text) if text else None,
             "error": r.get("error"),
-        })
-        if (i + 1) % 5 == 0 or i + 1 == len(segments):
-            report(f"gemini: {i + 1}/{len(segments)}", (i + 1) / len(segments))
+        }
+
+    # segments are independent 2-20s clips -> transcribe 6 at a time
+    rows: list[dict] = []
+    done = 0
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for row in pool.map(one, segments):
+            rows.append(row)
+            done += 1
+            if done % 5 == 0 or done == len(segments):
+                report(f"gemini: {done}/{len(segments)}", done / len(segments))
     write_jsonl(job_dir / "manifests" / "transcripts.jsonl", rows)
     n_err = sum(1 for r in rows if r["error"])
     if n_err == len(rows):

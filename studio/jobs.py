@@ -18,13 +18,15 @@ from pathlib import Path
 from .config import JOBS_DIR
 from .manifests import read_json, write_json
 
-STAGE_ORDER = ["ingest", "diarize", "denoise", "segment", "asr", "align"]
+# denoise removed from the pipeline (2026-08-07): it fed nothing downstream —
+# the dataset and detectors read the original, and per-speaker separation is
+# now the on-demand SF/SAM clean-lane path.
+STAGE_ORDER = ["ingest", "diarize", "segment", "asr", "align"]
 
 # stage -> marker path (relative to job dir) proving the stage completed
 MARKERS = {
     "ingest": "manifests/stage0_video.json",
     "diarize": "manifests/speakers.jsonl",
-    "denoise": "audio/denoised.wav",
     "segment": "manifests/segments.jsonl",
     "asr": "manifests/transcripts.jsonl",
     "align": "manifests/alignments.jsonl",
@@ -80,6 +82,9 @@ class JobStore:
                     if st.get("status") in ("running", "queued"):
                         st["status"] = "error"
                         st["msg"] = "interrupted (server restart)"
+                # drop stages no longer in the pipeline (e.g. denoise)
+                job["stages"] = {k: v for k, v in job.get("stages", {}).items()
+                                 if k in STAGE_ORDER}
                 self._status[d.name] = job
                 self._refresh_done(d.name)
 

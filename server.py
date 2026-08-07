@@ -22,7 +22,7 @@ from studio.config import (ASR_VENV_PY, DETECTOR_SOURCE_DEFAULT,
 from studio.detectors.registry import DETECTORS
 from studio.jobs import MARKERS, STAGE_ORDER, JobStore, video_id_from_url
 from studio.manifests import read_json, read_jsonl, write_jsonl
-from studio.stages import s0_ingest, s1_diarize, s2_denoise, s3_segment, s4_asr, s5_align
+from studio.stages import s0_ingest, s1_diarize, s3_segment, s4_asr, s5_align
 
 load_env()
 app = FastAPI(title="voice-tag-studio")
@@ -31,7 +31,6 @@ store = JobStore()
 STAGE_FNS = {
     "ingest": None,  # bound per-job with its URL below
     "diarize": s1_diarize.run,
-    "denoise": s2_denoise.run,
     "segment": s3_segment.run,
     "asr": s4_asr.run,
     "align": s5_align.run,

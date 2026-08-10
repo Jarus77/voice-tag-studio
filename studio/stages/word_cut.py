@@ -29,7 +29,7 @@ from .lane_asr import lane_wav_for
 from .s4_asr import script_profile
 
 GROUP_GAP_S = 0.60        # a word gap this long separates utterance groups
-BRIDGE_MAX_S = 1.60       # groups may merge across a silence up to this long
+BRIDGE_MAX_S = 2.00       # groups may merge across a silence up to this long
 BRIDGE_FOREIGN_MAX_S = 0.60   # ...unless the other speaker talks longer than
                               # this inside the bridge (masked silence is fine
                               # for a backchannel, not for a full turn)
@@ -111,8 +111,10 @@ def run(job_dir: Path, report) -> None:
         raise RuntimeError("lane_alignments.jsonl missing — run align first")
     lane_tr = {c["chunk_id"]: c for c in
                read_jsonl(job_dir / "manifests" / "lane_transcripts.jsonl")}
-    guard = float(read_json(job_dir / "job.json").get("crosstalk_guard")
-                  or CROSSTALK_GUARD_S)
+    cfg = read_json(job_dir / "job.json")
+    guard = float(cfg.get("crosstalk_guard") or CROSSTALK_GUARD_S)
+    min_seg = float(cfg.get("min_seg") or MIN_SEG_S)
+    bridge_max = float(cfg.get("bridge_max") or BRIDGE_MAX_S)
     all_turns = {r["speaker"]: [(t["start"], t["end"]) for t in r["turns"]]
                  for r in speakers}
 
@@ -161,10 +163,10 @@ def run(job_dir: Path, report) -> None:
             # ---- merge short groups across small, mostly-quiet bridges ----
             merged: list[list[int]] = []
             for g in groups:
-                if (merged and (span(merged[-1]) < MIN_SEG_S or span(g) < MIN_SEG_S)):
+                if (merged and (span(merged[-1]) < min_seg or span(g) < min_seg)):
                     bridge_a = words[merged[-1][-1]]["end"]
                     bridge_b = words[g[0]]["start"]
-                    if (bridge_b - bridge_a <= BRIDGE_MAX_S
+                    if (bridge_b - bridge_a <= bridge_max
                             and _overlap_s(bridge_a, bridge_b, others) <= BRIDGE_FOREIGN_MAX_S
                             and not _overlap_s(bridge_a, bridge_b, forbidden)):
                         merged[-1].extend(g)
@@ -192,7 +194,7 @@ def run(job_dir: Path, report) -> None:
             for g in final:
                 w0, w1 = words[g[0]], words[g[-1]]
                 dur_words = w1["end"] - w0["start"]
-                if dur_words < MIN_SEG_S:
+                if dur_words < min_seg:
                     dropped_short["n"] += 1
                     dropped_short["s"] += dur_words
                     continue
@@ -218,7 +220,7 @@ def run(job_dir: Path, report) -> None:
                            if w1["end"] - 0.2 <= a <= w1["end"] + TAIL_ISLAND_EXT_S]
                     if ext:
                         te = min(max(te, ext[0] + 0.1), nxt_start - EDGE_GAP_S)
-                if te - ts < MIN_SEG_S or te <= ts:
+                if te - ts < min_seg or te <= ts:
                     dropped_short["n"] += 1
                     dropped_short["s"] += max(0.0, te - ts)
                     continue

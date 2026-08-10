@@ -292,7 +292,10 @@ async function rerunStage(name, status) {
   let q = `force=true`;
   if (name === "diarize" && $("diarPicker").value)
     q += `&engine=${encodeURIComponent($("diarPicker").value)}`;
-  if (name === "segment") q += `&guard=${parseFloat($("guardInput").value || "0.15")}`;
+  if (name === "segment")
+    q += `&guard=${parseFloat($("guardInput").value || "0.15")}`
+      + `&min_len=${parseFloat($("minLenInput").value || "1.0")}`
+      + `&bridge=${parseFloat($("bridgeInput").value || "2.0")}`;
   await fetch(`/api/jobs/${state.vid}/stages/${name}?${q}`, { method: "POST" });
   poll();
 }

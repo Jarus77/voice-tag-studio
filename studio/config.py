@@ -15,7 +15,10 @@ PORT = int(os.environ.get("TAG_STUDIO_PORT", "8765"))
 
 # ---- audio conventions (carried over from the voice pipeline) ----
 SR = 16000                # internal working rate; master download kept untouched
-MIN_SEG_S = 2.0
+# 1.0s (was 2.0): with word-aware cutting, text/audio match is guaranteed by
+# construction, so short standalone utterances ("हेलो", "हाँ जी") — which a
+# conversational agent must produce constantly — can safely enter the dataset.
+MIN_SEG_S = 1.0
 MAX_SEG_S = 20.0
 MERGE_GAP_S = 0.30        # merge clean runs separated by less than this
 CROSSTALK_GUARD_S = 0.15  # widen other-speaker turns by this before subtracting
@@ -77,11 +80,11 @@ UTTERANCE_TAGS = {"whispers", "flatly", "cheerfully", "deadpan", "playfully",
 # Clip filters — all OFF by default (user decision 2026-08-08: keep every clip
 # and ablate later). Each row carries its flags so any subset is reproducible.
 EXPORT_EXCLUDE = {
-    "impure": False,        # purity below PURITY_OK
-    "clipped": False,       # first/last word cut in half
-    "separated": False,     # contains SepFormer-rescued overlap audio
-    "major_gap": False,     # audible speech with no transcript
-    "align_error": False,
+    "impure": False,        # purity below PURITY_OK (flagged, kept)
+    "clipped": True,        # first/last word cut in half = text/audio mismatch
+    "separated": False,     # SepFormer-rescued overlap (flagged, kept)
+    "major_gap": True,      # >1.5s audible speech with NO text = mismatch
+    "align_error": True,    # alignment failed — correspondence unverifiable
     "no_text": True,        # a clip with no transcript can never be a row
 }
 

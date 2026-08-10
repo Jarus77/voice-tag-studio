@@ -238,7 +238,8 @@ def _overlaps(job_dir: Path, min_s: float = 0.3, cap: int = 200) -> list[list[fl
 
 @app.post("/api/jobs/{vid}/stages/{stage}")
 def rerun_stage(vid: str, stage: str, force: bool = False,
-                engine: str | None = None, guard: float | None = None) -> dict:
+                engine: str | None = None, guard: float | None = None,
+                min_len: float | None = None, bridge: float | None = None) -> dict:
     if stage not in STAGE_ORDER:
         raise HTTPException(404, f"unknown stage {stage}")
     job = store.get(vid)
@@ -256,6 +257,14 @@ def rerun_stage(vid: str, stage: str, force: bool = False,
         if not 0.0 <= guard <= 1.0:
             raise HTTPException(400, "guard must be 0-1 seconds")
         store.set_field(vid, "crosstalk_guard", guard)
+    if stage == "segment" and min_len is not None:
+        if not 0.3 <= min_len <= 10.0:
+            raise HTTPException(400, "min_len must be 0.3-10 seconds")
+        store.set_field(vid, "min_seg", min_len)
+    if stage == "segment" and bridge is not None:
+        if not 0.0 <= bridge <= 5.0:
+            raise HTTPException(400, "bridge must be 0-5 seconds")
+        store.set_field(vid, "bridge_max", bridge)
     if stage == "ingest":
         url = job.get("url", "")
         fn = lambda d, r: s0_ingest.run(d, r, url)  # noqa: E731

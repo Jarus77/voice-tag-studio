@@ -119,20 +119,25 @@ def run(job_dir: Path, report) -> None:
 
 
 def _run_gemini(plan, tmpdir: Path, report) -> list[dict]:
+    import os
     from concurrent.futures import ThreadPoolExecutor
 
     from ..asr_bakeoff import _gemini_transcribe
+
+    # network-bound, so concurrency is nearly free speed — bounded only by
+    # the Gemini rate limit (Flash paid tier takes 16 easily)
+    workers = int(os.environ.get("VTS_ASR_CONCURRENCY", "16"))
 
     def one(item):
         spk, cid, a, b, lane, source = item
         wav = tmpdir / f"{cid}.wav"
         _cut(lane, a, b, wav)
-        r = _gemini_transcribe(wav)
-        if r.get("error") or not (r.get("text") or "").strip():
-            time.sleep(2)
-            r2 = _gemini_transcribe(wav)
-            if (r2.get("text") or "").strip() or not r.get("text"):
-                r = r2
+        r = {}
+        for attempt in range(4):          # backoff absorbs 429s at high concurrency
+            r = _gemini_transcribe(wav)
+            if not r.get("error") and (r.get("text") or "").strip():
+                break
+            time.sleep(2 ** attempt)
         wav.unlink(missing_ok=True)
         return {"speaker": spk, "chunk_id": cid,
                 "start": round(a, 3), "end": round(b, 3),
@@ -141,11 +146,12 @@ def _run_gemini(plan, tmpdir: Path, report) -> list[dict]:
                 "error": r.get("error")}
 
     rows, done = [], 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         for row in pool.map(one, plan):
             rows.append(row)
             done += 1
-            report(f"gemini chunk {done}/{len(plan)}", 0.05 + 0.9 * done / len(plan))
+            report(f"gemini chunk {done}/{len(plan)} ({workers} parallel)",
+                   0.05 + 0.9 * done / len(plan))
     return rows
 
 

@@ -129,6 +129,19 @@ def run(job_dir: Path, report) -> None:
                 report(f"modal unavailable ({type(e).__name__}) — "
                        f"local {device}", 0.10)
 
+        # VAD once per LANE, not per chunk: one sliding-window pass over the
+        # full lane (pyannote batches it) replaces a per-chunk Inference call
+        # with its per-call overhead — this was the stage's residual bottleneck
+        import soundfile as sf
+        speech_by: dict[str, list] = {}
+        spks = sorted({c["speaker"] for c in todo})
+        for si, spk in enumerate(spks):
+            lane, _ = lane_wav_for(job_dir, spk)
+            report(f"vad pass {si + 1}/{len(spks)} ({spk} lane)",
+                   0.62 + 0.12 * si / len(spks))
+            speech_by[spk] = al.speech_intervals(
+                lane, sf.info(str(lane)).duration)
+
         for i, ch in enumerate(todo):
             off = max(0.0, ch["start"] - CHUNK_PAD_S)
             dur = (ch["end"] - ch["start"]) + 2 * CHUNK_PAD_S
@@ -146,7 +159,10 @@ def run(job_dir: Path, report) -> None:
                     raise ValueError(got.get("error", "gpu align failed"))
                 spans = ([tuple(s) for s in got] if got is not None
                          else al.word_spans(wavs[i], words))
-                speech = al.speech_intervals(wavs[i], dur)
+                end_abs = off + dur
+                speech = [(max(a, off) - off, min(b, end_abs) - off)
+                          for a, b in speech_by[ch["speaker"]]
+                          if b > off and a < end_abs]
                 cover = merge_close([(max(0.0, a - WORD_PAD_S), b + WORD_PAD_S)
                                      for a, b in spans], 0.05)
                 islands = [(a, b) for a, b in subtract_intervals(speech, cover)
@@ -173,8 +189,8 @@ def run(job_dir: Path, report) -> None:
                 row.update({"status": "align_error", "words": [], "islands": [],
                             "error": f"{type(e).__name__}: {str(e)[:120]}"})
             rows.append(row)
-            report(f"vad+islands {i + 1}/{len(todo)} ({ch['chunk_id']}, "
-                   f"{row['status']})", 0.62 + 0.36 * (i + 1) / len(todo))
+            report(f"islands {i + 1}/{len(todo)} ({ch['chunk_id']}, "
+                   f"{row['status']})", 0.76 + 0.22 * (i + 1) / len(todo))
 
     write_jsonl(job_dir / "manifests" / "lane_alignments.jsonl", rows)
     from collections import Counter

@@ -82,7 +82,9 @@ UTTERANCE_TAGS = {"whispers", "flatly", "cheerfully", "deadpan", "playfully",
 EXPORT_EXCLUDE = {
     "impure": False,        # purity below PURITY_OK (flagged, kept)
     "clipped": True,        # first/last word cut in half = text/audio mismatch
-    "separated": False,     # SepFormer-rescued overlap (flagged, kept)
+    "separated": True,      # SepFormer-reconstructed audio has audible
+                            # artifacts on telephony — transcripts/tags keep
+                            # the rescue value; the AUDIO never trains
     "major_gap": True,      # >1.5s audible speech with NO text = mismatch
     "align_error": True,    # alignment failed — correspondence unverifiable
     "no_text": True,        # a clip with no transcript can never be a row

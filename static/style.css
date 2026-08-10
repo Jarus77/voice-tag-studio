@@ -227,3 +227,6 @@ button.danger:hover:not(:disabled) { border-color: var(--err); background: #2b1e
 .audible-label { font: 12px var(--mono); color: var(--acc); min-width: 90px; }
 #transport audio { flex: 1; height: 36px; }
 .lg-plain { border: 1px solid var(--dim); color: var(--dim); }
+
+#transcript .seg.excluded { opacity: .4; }
+#transcript .seg.excluded:hover { opacity: .75; }

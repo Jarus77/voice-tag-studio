@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-tag-studio</title>
-<link rel="stylesheet" href="style.css?v=29">
+<link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
 
@@ -69,11 +69,11 @@
   <div class="cardHead">
     <h2>Segments</h2>
     <span id="transcriptBadge" class="badge"></span>
-    <span class="hint">each clip: waveform + words · ▶ plays just that clip · words highlight as it plays · click a word to jump</span>
+    <span class="hint">this view = the training data: each row is one clip + its exact text · dimmed rows are excluded by the export gate · ▶ plays the clip on its own lane</span>
     <label class="hint" style="margin-left:auto"><input type="checkbox" id="showWordTimes" style="vertical-align:-2px"> show word times</label>
   </div>
   <div class="legend">
-    <span><b class="lg-resc">rescued 12%</b> = that share of the clip is overlap audio recovered by SepFormer; the rest is untouched original (hover for seconds)</span>
+    <span><b class="lg-resc">rescued 12%</b> = that share is SepFormer-reconstructed overlap audio — kept for transcripts/tags but <b>excluded from training rows</b> (audible artifacts)</span>
     <span><b class="lg-imp">impure 0.54</b> = voice match to this speaker's own voiceprint is below 0.55 — listen: crosstalk, wrong speaker, or a false alarm</span>
     <span><b class="lg-imp">✂ start/end</b> = the first/last word runs into the clip edge — probably cut in half</span>
     <span><b class="lg-plain">digits_uncertain</b> = the clip has unaligned audio, but the text contains digits (87,000 · 10-15%) which forced alignment can't time — usually harmless. Dotted-underlined words are those untimed tokens.</span>
@@ -105,6 +105,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>

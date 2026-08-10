@@ -643,6 +643,12 @@ async function loadManifests() {
     state.alignments = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
     mark("alignments.jsonl", "alignments"); dirty = true;
   }
+  if (st.export?.status === "done" && stale("dataset.jsonl", "dataset")) {
+    const rows = (await get("dataset.jsonl")) || [];
+    state.datasetIds = new Set(rows.map((r) => r.sample_id));
+    state.datasetLines = Object.fromEntries(rows.map((r) => [r.sample_id, r.line]));
+    mark("dataset.jsonl", "dataset"); dirty = true;
+  }
   if (st.segment?.status === "done") $("bakeoffSec").classList.remove("hidden");
   if ((state.job.detectors || {}).bakeoff?.status === "done"
       && stale("asr_bakeoff.jsonl", "bakeoff")) {
@@ -680,8 +686,11 @@ function renderEmptyStates() {
   const nImpure = state.segments.filter((s) => s.purity != null && !s.purity_pass).length;
   const nClip = Object.values(state.alignments).filter((a) => a.clipped?.length).length;
   const nResc = state.segments.filter((s) => s.separated).length;
+  const nData = state.datasetIds
+    ? state.segments.filter((s) => state.datasetIds.has(s.seg_id)).length : null;
   $("transcriptBadge").textContent = state.segments.length
-    ? `${state.segments.length} segments · ${new Set(state.segments.map((s) => s.speaker)).size} speakers`
+    ? `${state.segments.length} clips`
+      + (nData !== null ? ` · ${nData} in dataset · ${state.segments.length - nData} excluded` : "")
       + (nResc ? ` · ${nResc} rescued` : "")
       + (nImpure ? ` · ${nImpure} impure` : "")
       + (nClip ? ` · ${nClip} clipped` : "")
@@ -723,6 +732,8 @@ const segPeakObserver = new IntersectionObserver((entries) => {
   });
 }, { rootMargin: "300px" });
 
+function f_of(ev, cv) { return ev.offsetX / cv.clientWidth; }
+
 function drawSegWave(cv) {
   const p = cv._peaks;
   const W = (cv.width = cv.clientWidth * devicePixelRatio);
@@ -757,6 +768,21 @@ function renderTranscript() {
     const al = state.alignments[seg.seg_id];
     const row = document.createElement("div");
     row.className = "seg";
+    // after export: dim clips that are NOT in the training dataset
+    let excluded = null;
+    if (state.datasetIds) {
+      if (!state.datasetIds.has(seg.seg_id)) {
+        const a = state.alignments[seg.seg_id] || {};
+        const t = state.transcripts[seg.seg_id] || {};
+        excluded = !((t.text || "").trim()) ? "no text"
+          : seg.separated ? "separated audio (SepFormer artifacts)"
+          : a.status === "major_gap" ? "audible speech with no text"
+          : a.status === "align_error" ? "alignment failed"
+          : (a.clipped || []).length ? "clipped edge word"
+          : "export gate";
+        row.classList.add("excluded");
+      }
+    }
     row.dataset.seg = seg.seg_id;
     row.dataset.start = seg.start;
     row.dataset.end = seg.end;
@@ -778,13 +804,14 @@ function renderTranscript() {
     segPeakObserver.observe(cv);
     cv.onclick = (ev) => {
       ev.stopPropagation();
-      const f = ev.offsetX / cv.clientWidth;
+      soloClipLane(seg.speaker);
       state.playStopAt = seg.end;
-      player.currentTime = seg.start + f * seg.dur;
+      player.currentTime = seg.start + f_of(ev, cv) * seg.dur;
       player.play().catch(() => {});
     };
     meta.querySelector(".segplay").onclick = (ev) => {
       ev.stopPropagation();
+      soloClipLane(seg.speaker);
       state.playStopAt = seg.end;
       player.currentTime = seg.start;
       player.play().catch(() => {});
@@ -851,7 +878,7 @@ function renderTranscript() {
         span.title = `${abs.toFixed(2)}s → ${(seg.start + w.end).toFixed(2)}s ` +
           `(${(w.end - w.start).toFixed(2)}s) · segment-relative ` +
           `${w.start.toFixed(2)}–${w.end.toFixed(2)}`;
-        span.onclick = (ev) => { ev.stopPropagation(); seekPlay(abs); };
+        span.onclick = (ev) => { ev.stopPropagation(); seekPlay(abs, seg.speaker); };
         text.appendChild(span);
       });
       emitChips(tokens.length);      // tags after the last word
@@ -896,6 +923,14 @@ function renderTranscript() {
       chip.textContent = ">20s";
       text.appendChild(chip);
     }
+    if (excluded) {
+      const chip = document.createElement("span");
+      chip.className = "chip over";
+      chip.textContent = "✗ not in dataset";
+      chip.title = "excluded from training rows: " + excluded +
+        " — flip studio/config.py::EXPORT_EXCLUDE to change the policy";
+      text.appendChild(chip);
+    }
     if (seg.separated) {
       const chip = document.createElement("span");
       chip.className = "chip status";
@@ -925,7 +960,7 @@ function renderTranscript() {
       text.appendChild(chip);
     });
     row.appendChild(text);
-    row.onclick = () => seekPlay(seg.start);
+    row.onclick = () => seekPlay(seg.start, seg.speaker);
     el.appendChild(row);
   });
 }
@@ -974,17 +1009,36 @@ function makeChip(c, seg) {
   chip.className = "chip";
   chip.textContent = `[${c.tag}] ${chipLabel(c)}`;
   chip.title = chipTitle(c);
-  chip.onclick = (ev) => { ev.stopPropagation(); playWindow(seg.start + (c.position_s ?? 0)); };
+  chip.onclick = (ev) => { ev.stopPropagation(); playWindow(seg.start + (c.position_s ?? 0), seg.speaker); };
   return chip;
 }
 
-function seekPlay(t) {
+/** the lane a speaker's clips are actually cut from (clean lane if built) */
+function laneNameFor(spk) {
+  const prefix = "sam_" + spk.toLowerCase() + "_clean";
+  for (const n of state.tracks.keys()) if (n.startsWith(prefix)) return n;
+  return spk;
+}
+
+/** ensure the audible mix is the clip's own source lane — otherwise playing
+ *  a clip plays whatever lane was last soloed (another speaker's sentence
+ *  "cutting in", which is NOT the training audio) */
+function soloClipLane(spk) {
+  if (!spk) return;
+  const lane = laneNameFor(spk);
+  if (state.tracks.has(lane) && (state.mix.size !== 1 || !state.mix.has(lane)))
+    setMix(new Set([lane]));
+}
+
+function seekPlay(t, spk) {
+  soloClipLane(spk);
   state.playStopAt = null;
   player.currentTime = Math.max(0, t);
   player.play().catch(() => {});
 }
 
-function playWindow(t) {
+function playWindow(t, spk) {
+  soloClipLane(spk);
   player.currentTime = Math.max(0, t - 2);
   state.playStopAt = t + 2;
   player.play().catch(() => {});

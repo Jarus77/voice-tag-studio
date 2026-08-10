@@ -137,6 +137,28 @@ def run(job_dir: Path, report) -> None:
         rescued = _rescued_regions(job_dir, spk)
         wavs: dict[Path, object] = {}    # lazy-load lane / original
         n_spk = 0
+        last_te = -1e12    # one speaker's clips must never overlap: tight
+                           # word gaps let start/end pads collide, giving two
+                           # clips a sliver of shared audio (text pollution)
+
+        # every word of this speaker across ALL chunks, time-sorted: clip
+        # boundaries must clamp against the neighbouring word even when it
+        # lives in the next/previous ASR chunk (chunks overlap by the pad,
+        # and a trailing digit-island extension could otherwise bleed into
+        # the next chunk's first word — audio the clip's text doesn't have)
+        import bisect
+        gw = sorted((w for c in chunks if c["speaker"] == spk
+                     for w in (c.get("words") or [])), key=lambda w: w["start"])
+        g_starts = [w["start"] for w in gw]
+        g_ends = sorted(w["end"] for w in gw)
+
+        def global_prev_end(t: float) -> float:
+            k = bisect.bisect_left(g_ends, t)
+            return g_ends[k - 1] if k else -1e12
+
+        def global_next_start(t: float) -> float:
+            k = bisect.bisect_right(g_starts, t)
+            return g_starts[k] if k < len(g_starts) else 1e12
 
         for ch in [c for c in chunks if c["speaker"] == spk]:
             words = ch.get("words") or []
@@ -219,12 +241,14 @@ def run(job_dir: Path, report) -> None:
                 # clip — better than emitting a `clipped` row the export gate
                 # then drops whole.
                 while g:
-                    prev = words[g[0] - 1]["end"] if g[0] > 0 else -1e12
+                    prev = (words[g[0] - 1]["end"] if g[0] > 0
+                            else global_prev_end(words[g[0]]["start"] - 1e-6))
                     if prev + EDGE_GAP_S <= words[g[0]]["start"] - CLIPPED_EDGE_S:
                         break
                     g = g[1:]
                 while g:
-                    nxt = words[g[-1] + 1]["start"] if g[-1] + 1 < len(words) else 1e12
+                    nxt = (words[g[-1] + 1]["start"] if g[-1] + 1 < len(words)
+                           else global_next_start(words[g[-1]]["end"] + 1e-6))
                     if words[g[-1]]["end"] + CLIPPED_EDGE_S <= nxt - EDGE_GAP_S:
                         break
                     g = g[:-1]
@@ -248,9 +272,12 @@ def run(job_dir: Path, report) -> None:
                 # boundaries: pad into the surrounding gaps, never into a
                 # neighbouring word (words are time-sorted, so index
                 # neighbours ARE the time neighbours)
-                prev_end = words[g[0] - 1]["end"] if g[0] > 0 else 0.0
-                nxt_start = words[g[-1] + 1]["start"] if g[-1] + 1 < len(words) else 1e12
-                ts = max(w0["start"] - PAD_START_S, prev_end + EDGE_GAP_S, 0.0)
+                prev_end = (words[g[0] - 1]["end"] if g[0] > 0
+                            else global_prev_end(w0["start"] - 1e-6))
+                nxt_start = (words[g[-1] + 1]["start"] if g[-1] + 1 < len(words)
+                             else global_next_start(w1["end"] + 1e-6))
+                ts = max(w0["start"] - PAD_START_S, prev_end + EDGE_GAP_S,
+                         last_te + 0.01, 0.0)
                 te = min(w1["end"] + PAD_END_S, nxt_start - EDGE_GAP_S)
                 # trailing unaligned tokens (digits): extend over their island
                 if any(i > w1["i"] for i in tok_ids):
@@ -336,6 +363,7 @@ def run(job_dir: Path, report) -> None:
                     "clipped": clipped,
                 })
                 n_spk += 1
+                last_te = te
         report(f"{spk}: {n_spk} clips from {source}",
                0.1 + 0.8 * (speakers.index(spk_row) + 1) / len(speakers))
 

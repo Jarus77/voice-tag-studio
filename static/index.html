@@ -36,7 +36,7 @@
       <input id="minLenInput" type="number" min="0.3" max="10" step="0.1" value="1.0" style="width:60px"> s</label>
     <label class="hint" title="short utterances merge with a neighbour across a silence up to this long (the silence stays in the clip as a natural pause)">bridge
       <input id="bridgeInput" type="number" min="0" max="5" step="0.1" value="2.0" style="width:60px"> s</label>
-    <button id="runRemaining" title="queue every not-yet-done stage, in order">Run remaining ▸</button>
+    <button id="runRemaining" title="queue every not-yet-done stage in order — including ALL emotion detectors before export, so the dataset comes out tagged">Run remaining ▸</button>
   </div>
   <div id="stepper" class="stepper"></div>
   <div id="stageError" class="stageError hidden"></div>
@@ -92,6 +92,7 @@
   <div class="row">
     <select id="detPicker"></select>
     <button id="detRun">Run detector</button>
+    <button id="detRunAll" title="queue every detector, one after another (re-runs even the already-done ones — use after re-cutting segments)">Run all ▸</button>
     <span id="detStatus" class="detStatus"></span>
   </div>
   <div id="hitsEmpty" class="empty"></div>
@@ -105,6 +106,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=40"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>

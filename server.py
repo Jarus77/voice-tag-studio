@@ -351,11 +351,18 @@ def run_detect(vid: str, body: DetectReq) -> dict:
     if det is None:
         raise HTTPException(404, f"unknown detector {body.detector}")
     job_dir = JOBS_DIR / vid
-    segments = read_jsonl(job_dir / "manifests" / "segments.jsonl")
-    if not segments:
+    # segments are read when the detector RUNS, not when it's queued — so
+    # "run remaining" can queue detectors behind a still-running segment stage
+    seg_state = (read_json(job_dir / "job.json").get("stages", {})
+                 .get("segment", {}).get("status"))
+    if (not (job_dir / "manifests" / "segments.jsonl").exists()
+            and seg_state not in ("queued", "running")):
         raise HTTPException(409, "run the segment stage first")
 
     def fn(d: Path, report) -> None:
+        segments = read_jsonl(d / "manifests" / "segments.jsonl")
+        if not segments:
+            raise RuntimeError("no segments — run the segment stage first")
         rows = det.detect(d, segments, report)
         write_jsonl(d / "manifests" / f"candidates_{det.name}.jsonl", rows)
         report(f"{len(rows)} candidates", 1.0)

@@ -53,7 +53,7 @@ so you can inspect the output before moving on.
 | family | tags | detector |
 |---|---|---|
 | **reactions** | `[laughs]` `[sigh]` `[gasps]` | PANNs CNN14 sound-event detection (AudioSet) |
-| **beats** | `[pauses]` `[hesitates]` `[stammers]` | rules over forced alignment — deterministic, free |
+| **beats** | `[pauses]` `[silence]` `[hesitates]` `[stammers]` | rules over forced alignment — deterministic, free. `[pauses]` (0.5–1.5 s gap) and `[silence]` (≥1.5 s) are also derived automatically at export, so in-clip silence is always in the text |
 | **vocal effort** | `[whispers]` | voiced-frame ratio (physics, language-independent) |
 | **tone** | `[flatly]` `[cheerfully]` | per-speaker pitch percentiles |
 | **states** | `[excited]` `[nervous]` `[frustrated]` `[sorrowful]` `[calm]` | audeering wav2vec2 arousal/valence, per-speaker percentiles |

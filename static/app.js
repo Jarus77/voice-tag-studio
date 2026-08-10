@@ -131,9 +131,24 @@ $("fileInput").addEventListener("change", async (ev) => {
   }
 });
 
+async function queueAllDetectors(skipDone) {
+  for (const det of state.job.detector_names || []) {
+    const d = (state.job.detectors || {})[det];
+    if (d && ["running", "queued"].includes(d.status)) continue;
+    if (skipDone && d && d.status === "done") continue;
+    state.loaded["cand_" + det] = -1;
+    await fetch(`/api/jobs/${state.vid}/detect`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ detector: det }),
+    });
+  }
+}
+
 $("runRemaining").addEventListener("click", async () => {
   if (!state.vid || !state.job) return;
   for (const [name, st] of Object.entries(state.job.stages)) {
+    if (name === "export")           // tags first: they feed the dataset rows
+      await queueAllDetectors(true);
     if (["done", "running", "queued"].includes(st.status)) continue;
     state.optimistic[name] = true;
     await fetch(`/api/jobs/${state.vid}/stages/${name}?force=false`, { method: "POST" });
@@ -1160,6 +1175,12 @@ function renderDetectors() {
   btn.disabled = busy;
   btn.textContent = busy ? "Running…" : "Run detector";
 }
+
+$("detRunAll").addEventListener("click", async () => {
+  if (!state.vid || !state.job) return;
+  await queueAllDetectors(false);    // re-runs done ones too (segments may have changed)
+  poll();
+});
 
 $("detRun").addEventListener("click", async () => {
   const det = $("detPicker").value;

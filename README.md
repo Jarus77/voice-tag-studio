@@ -39,12 +39,14 @@ truncate a word, because word positions are known before any cut is made.
 | **clean** *(optional)* | rescues overlapped speech instead of discarding it | SepFormer + ECAPA purity gate |
 | **asr** | verbatim Hinglish lane transcript in ~60 s chunks, **fillers preserved** | Gemini 2.5 Flash (or srota) |
 | **align** | word-level timestamps on the lane, unaligned-speech "islands" | torchaudio `MMS_FA` + uroman |
-| **segment** | cuts 2–20 s clips **only in verified word gaps**; clip text is derived from the aligned words inside it | word timings, no model |
+| **segment** | cuts 1–20 s clips **only in verified word gaps**; clip text is derived from the aligned words inside it. Clips cut *around* rescued overlap and alignment glitches; solo windows are cut from the **original recording** (continuous room tone, no processing artifacts) | word timings, no model |
 | **detectors** | emotion tag candidates | see below |
 | **export** | `dataset.jsonl` — clip + tagged text + speaker × tag matrix | — |
 
 Nothing runs automatically except ingest: **every stage runs when you click it**,
-so you can inspect the output before moving on.
+so you can inspect the output before moving on. **Run remaining ▸** queues every
+not-yet-done stage in order — including all detectors before export, so one click
+ends in a tagged dataset.
 
 ---
 
@@ -100,10 +102,12 @@ python server.py          # http://127.0.0.1:8765
 2. Click **diarize**. Speaker lanes appear — click a lane name to hear only that voice,
    or name it (`agent`, `khushi`) since `SPEAKER_00` is an arbitrary label.
 3. *(optional)* Click **clean** on a speaker to rescue their overlapped speech.
-4. Click **asr** → **align** → **segment**. The Segments view shows each clip's
-   waveform beside its words, which highlight karaoke-style as it plays.
-5. **Tags** section: pick a detector, **Run detector**, then audition each hit
-   with ▶ ±2s. Tags also appear inline in the transcript at their exact position.
+4. Click **asr** → **align** → **segment**. The Segments view **is the training
+   data**: each row is one clip beside its exact text (karaoke-highlighted as it
+   plays); dimmed rows are excluded by the export gate, with the reason.
+5. **Tags** section: run one detector and audition each hit with ▶ ±2s, or
+   **Run all ▸** for every detector (re-run it after re-cutting segments).
+   Tags appear inline in the transcript at their exact position.
 6. Click **export** → `jobs/<id>/manifests/dataset.jsonl`.
 
 ![segments and tags](docs/transcript-tag.png)
@@ -112,6 +116,12 @@ python server.py          # http://127.0.0.1:8765
 occur — `[hesitates] 0.58s`, `[pauses] 0.72s`, `[stammers] "एक"` — with the
 quantity you can judge by ear rather than an opaque score. Words highlight
 karaoke-style during playback.*
+
+**Export gate** (`studio/config.py::EXPORT_EXCLUDE`): clips whose text↔audio
+correspondence is broken or unverifiable — no text, edge word cut in half,
+SepFormer-reconstructed audio, major alignment gap, alignment failure — stay
+visible in the UI but never become dataset rows. `impure` (voiceprint below
+0.55) is kept and flagged: it's a suspicion, not a proven mismatch.
 
 **Quality flags** shown per clip — nothing is silently dropped:
 `rescued N%` (share of separated audio) · `impure 0.54` (voice mismatch) ·
@@ -154,7 +164,7 @@ extrapolation.
   "tags": ["hesitates", "pauses"],
   "wav": "segments/SPEAKER_01/EOKZrphv3QI_SPEAKER_01_0007.wav",
   "dur": 17.9, "split": "train",
-  "source": "clean:sepformer", "separated_frac": 0.13,
+  "source": "original", "separated_frac": 0.0,
   "purity": 0.83, "align_status": "filler_suspect", "clipped": []
 }
 ```
@@ -172,7 +182,15 @@ Carried over from the production voice pipeline this grew out of:
 - **Precision over recall.** A wrong tag is a text↔audio mismatch — hallucination
   fuel. A missed tag is merely unused data.
 - **Never train on two voices.** Other speakers' turns are subtracted with a guard
-  band; overlap is dropped unless separation passes a voiceprint gate.
+  band; overlapped seconds never enter a clip.
+- **Train on the raw recording.** Solo clip windows are cut from the original
+  audio — diarization, separation and alignment only *decide* where to cut and
+  what the text is; they never process what the model hears.
+- **Silence must be in the text.** In-clip word gaps become `[pauses]` (0.5–1.5 s)
+  or `[silence]` (≥1.5 s) automatically at export — untagged silence is a
+  text↔audio mismatch.
+- **Distrust absurd timings.** A single aligned word longer than 2 s is an
+  alignment glitch; its span is unusable and clips cut around it.
 - **Separated audio is a working surface, never training audio.** SepFormer's
   reconstruction feeds ASR and alignment (so transcripts survive overlap), but
   clips are cut *around* rescued regions — every trained second is original audio.

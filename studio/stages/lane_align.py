@@ -48,7 +48,8 @@ def _modal_spans(todo, wavs, prep, report) -> dict:
         audio, _sr = sf.read(wavs[i], dtype="float32")
         items.append((i, audio, words))
 
-    B = 8
+    B = 2      # chunks are ~60 s; bigger batches OOM the T4 —
+               # throughput comes from container fan-out instead
     payloads: list[tuple[bytes, list[int]]] = []
     for k in range(0, len(items), B):
         grp = items[k:k + B]

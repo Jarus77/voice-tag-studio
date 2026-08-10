@@ -56,18 +56,36 @@ class Aligner:
         import numpy as np
         torch = self.torch
         d = np.load(io.BytesIO(blob))
-        audio = torch.from_numpy(d["audio"].astype(np.float32)).to("cuda")
+        audio_np = d["audio"].astype(np.float32)
         lens = d["lens"]
         words = json.loads(bytes(d["words"]).decode())
-        with torch.inference_mode():
-            em, out_lens = self.model(
-                audio, torch.tensor(lens, device="cuda"))
-        em, out_lens = em.cpu(), out_lens.cpu()
+
+        def emissions(x_np, ln):
+            with torch.inference_mode():
+                em, ol = self.model(
+                    torch.from_numpy(x_np).to("cuda"),
+                    torch.tensor(ln, device="cuda"))
+            return em.cpu(), ol.cpu()
+
+        try:
+            em, out_lens = emissions(audio_np, lens)
+            ems = [em[i, :int(out_lens[i])] for i in range(len(lens))]
+        except torch.cuda.OutOfMemoryError:
+            # chunks are up to 60 s — a full batch can exceed T4 memory;
+            # fall back to one-at-a-time on this container
+            torch.cuda.empty_cache()
+            ems = []
+            for i in range(len(lens)):
+                e1, o1 = emissions(audio_np[i:i + 1, :int(lens[i])],
+                                   lens[i:i + 1])
+                ems.append(e1[0, :int(o1[0])])
+                torch.cuda.empty_cache()
+
         out = []
         for i, ws in enumerate(words):
             try:
-                spans = self.fa(em[i, :int(out_lens[i])], self.tokenizer(ws))
-                ratio = float(lens[i]) / float(out_lens[i]) / 16000.0
+                spans = self.fa(ems[i], self.tokenizer(ws))
+                ratio = float(lens[i]) / float(ems[i].size(0)) / 16000.0
                 out.append([[s[0].start * ratio, s[-1].end * ratio]
                             for s in spans])
             except Exception as e:                       # per-chunk, not fatal

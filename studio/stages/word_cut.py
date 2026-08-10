@@ -181,6 +181,8 @@ def run(job_dir: Path, report) -> None:
                     final.append(g)
                     return
                 lo, hi = max(1, len(g) // 5), max(1, len(g) * 4 // 5)
+                if hi <= lo:                # tiny group (2-3 words): any gap
+                    lo, hi = 1, len(g)
                 cand = [(words[g[k]]["start"] - words[g[k - 1]]["end"], k)
                         for k in range(lo, hi)]
                 big = [c for c in cand if c[0] >= SPLIT_GAP_MIN_S]

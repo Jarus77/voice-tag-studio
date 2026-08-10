@@ -269,6 +269,18 @@ function renderStepper() {
     const pct = status === "running" ? Math.round((st.progress || 0) * 100) : null;
     // the segment step announces WHICH audio it will cut from, per speaker
     let idle = STAGE_EXPLAIN[name] || "";
+    // the clean step pre-computes the run-it-or-skip-it call: reconstruction
+    // never trains, so it's only worth CPU when overlap is substantial
+    if (name === "clean" && state.job?.stages?.diarize?.status === "done") {
+      const ov = state.job.overlaps || [];
+      if (!ov.length) idle = "no overlap — skip";
+      else {
+        const tot = ov.reduce((a, [b, e]) => a + (e - b), 0);
+        const worst = Math.max(...ov.map(([b, e]) => e - b));
+        idle = `${tot.toFixed(1)}s overlap — ` +
+          (tot >= 8 || worst >= 1.5 ? "worth running" : "likely skippable");
+      }
+    }
     if (name === "segment" && state.job?.stages?.diarize?.status === "done") {
       const have = cleanSpeakers();
       const spks = (state.job.sources || [])

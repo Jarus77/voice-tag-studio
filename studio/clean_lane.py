@@ -144,19 +144,12 @@ def _spans_audio(x: np.ndarray, spans_rel: list[tuple]) -> np.ndarray | None:
     return cat if len(cat) >= 8000 else None
 
 
-def _separate_window_sepformer(audio16, a, b, centroid, my_spans_rel):
-    """Blind 2-speaker separation; assign streams by embedding similarity
-    measured ONLY on the target's turn spans (whole-window embeddings are
-    silence-polluted in sparse windows)."""
-    import torch
-    sep = _get_sepformer()
-    i0, i1 = int(a * 16000), min(len(audio16), int(b * 16000))
-    mix = torch.from_numpy(audio16[i0:i1])[None]
-    with torch.inference_mode():
-        est = sep.separate_batch(mix)        # (1, T, n_src)
-    est = est[0].cpu().numpy()
+def _pick_stream(est, mix_peak, my_spans_rel, centroid):
+    """Of the two separated streams, keep the one matching the target's
+    voiceprint — similarity measured ONLY on the target's turn spans
+    (whole-window embeddings are silence-polluted in sparse windows)."""
     est = est / (np.abs(est).max(axis=0, keepdims=True) + 1e-9) \
-        * (np.abs(audio16[i0:i1]).max() + 1e-9)
+        * (mix_peak + 1e-9)
     sims = []
     for k in range(est.shape[1]):
         x = _spans_audio(est[:, k], my_spans_rel)
@@ -164,6 +157,80 @@ def _separate_window_sepformer(audio16, a, b, centroid, my_spans_rel):
             x = est[:, k].astype(np.float32)
         sims.append(float(np.dot(_embed(x), centroid)))
     return est[:, int(np.argmax(sims))].astype(np.float32), max(sims)
+
+
+def _sep_local(mixes: list[np.ndarray], progress) -> list[np.ndarray]:
+    """CPU separation, 4 windows per forward pass — torch spreads the batch
+    across all cores, so this IS the CPU parallelization."""
+    import torch
+    sep = _get_sepformer()
+    out: list[np.ndarray] = []
+    B = 4
+    for i in range(0, len(mixes), B):
+        chunk = mixes[i:i + B]
+        T = max(len(m) for m in chunk)
+        mb = torch.zeros(len(chunk), T)
+        for j, m in enumerate(chunk):
+            mb[j, :len(m)] = torch.from_numpy(m)
+        with torch.inference_mode():
+            est = sep.separate_batch(mb).cpu().numpy()    # (B, T, 2)
+        for j, m in enumerate(chunk):
+            out.append(est[j, :len(m)].astype(np.float32))
+        progress(len(out))
+    return out
+
+
+def _sep_modal(mixes: list[np.ndarray], progress) -> list[np.ndarray]:
+    """GPU separation on the deployed `voice-tag-sepformer` Modal app.
+    All chunks are spawned up front (Modal fans them out over containers),
+    then gathered in order; one respawn per chunk covers transient wedges."""
+    import io
+
+    import modal
+    Sep = modal.Cls.from_name("voice-tag-sepformer", "Separator")()
+    B = 8
+    chunks: list[tuple[bytes, list[int]]] = []
+    for i in range(0, len(mixes), B):
+        group = mixes[i:i + B]
+        T = max(len(m) for m in group)
+        arr = np.zeros((len(group), T), dtype=np.float16)
+        for j, m in enumerate(group):
+            arr[j, :len(m)] = m
+        buf = io.BytesIO()
+        np.savez_compressed(buf, mixes=arr)
+        chunks.append((buf.getvalue(), [len(m) for m in group]))
+    handles = [Sep.separate.spawn(blob) for blob, _ in chunks]
+    out: list[np.ndarray] = []
+    for h, (blob, lens) in zip(handles, chunks):
+        try:
+            got = h.get(timeout=600)
+        except Exception:
+            got = Sep.separate.spawn(blob).get(timeout=600)
+        est = np.load(io.BytesIO(got))["est"].astype(np.float32)
+        for j, ln in enumerate(lens):
+            out.append(est[j, :ln])
+        progress(len(out))
+    return out
+
+
+def _separate_all(mixes: list[np.ndarray], report, frac):
+    """Backend chooser. VTS_SEPFORMER_BACKEND=auto|modal|cpu (default auto:
+    try the Modal GPU app, fall back to batched CPU)."""
+    import os
+    mode = os.environ.get("VTS_SEPFORMER_BACKEND", "auto")
+    if mode in ("auto", "modal"):
+        try:
+            out = _sep_modal(mixes, lambda d: report(
+                f"sepformer [gpu:modal] {d}/{len(mixes)} windows", frac(d)))
+            return out, "gpu:modal"
+        except Exception as e:
+            if mode == "modal":
+                raise
+            report(f"modal unavailable ({type(e).__name__}) — "
+                   f"batched CPU fallback", frac(0))
+    out = _sep_local(mixes, lambda d: report(
+        f"sepformer [cpu, batch 4] {d}/{len(mixes)} windows", frac(d)))
+    return out, "cpu"
 
 
 # ---------------- purity ----------------
@@ -256,13 +323,43 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     report("computing speaker centroid", 0.08)
     centroid = speaker_centroid(audio, my, others)
 
+    # ---- separation first: batched (GPU when the Modal app is deployed) and
+    # cached per window. SepFormer's output depends only on the window audio,
+    # not on which speaker we're building — so every speaker's build shares
+    # the cache and the 2nd/3rd lane separates (almost) nothing.
+    cache_dir = job_dir / "manifests" / "sep_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    ests: dict[int, np.ndarray] = {}
+    todo: list[int] = []
+    mixes: list[np.ndarray] = []
+    for wi, (a, b) in enumerate(windows):
+        cf = cache_dir / f"{a:.2f}_{b:.2f}.npy"
+        if cf.exists():
+            ests[wi] = np.load(cf).astype(np.float32)
+        else:
+            todo.append(wi)
+            mixes.append(audio[int(a * 16000):min(len(audio), int(b * 16000))]
+                         .astype(np.float32))
+    if len(windows) > len(todo):
+        report(f"{len(windows) - len(todo)}/{len(windows)} windows already "
+               f"separated (cache)", 0.09)
+    if todo:
+        outs, backend = _separate_all(
+            mixes, report, lambda d: 0.10 + 0.65 * d / len(mixes))
+        for wi, est in zip(todo, outs):
+            a, b = windows[wi]
+            np.save(cache_dir / f"{a:.2f}_{b:.2f}.npy", est.astype(np.float16))
+            ests[wi] = est
+
     purity = {"speaker": speaker, "engine": engine, "purity_ok": PURITY_OK,
               "windows": []}
     rescued_regions: list[tuple] = []
     for i, (a, b) in enumerate(windows):
         my_rel = [(max(s, a) - a, min(e, b) - a) for s, e in my
                   if e > a and s < b]
-        y, assign_sim = _separate_window_sepformer(audio, a, b, centroid, my_rel)
+        i0m, i1m = int(a * 16000), min(len(audio), int(b * 16000))
+        y, assign_sim = _pick_stream(ests[i], np.abs(audio[i0m:i1m]).max(),
+                                     my_rel, centroid)
 
         # Paste separated audio ONLY over the real overlap seconds that are
         # also this speaker's speech. Solo speech inside the window keeps the
@@ -302,10 +399,10 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
             "rescued_s": round(sum(e - s for s, e in paste), 2) if passed else 0.0,
             **({"assign_sim": round(assign_sim, 3)} if assign_sim is not None else {}),
         })
-        report(f"{engine} window {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s, "
+        report(f"{engine} paste+gate {i + 1}/{len(windows)} ({a:.0f}-{b:.0f}s, "
                f"purity {'n/a (sparse)' if p is None else f'{p:.2f}'}"
                f"{'' if passed else ' — reverted to original'})",
-               0.08 + 0.88 * (i + 1) / len(windows))
+               0.76 + 0.19 * (i + 1) / len(windows))
     purity["rescued_regions"] = [[round(s, 2), round(e, 2)]
                                  for s, e in merge_close(rescued_regions, 0.05)]
 

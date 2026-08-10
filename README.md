@@ -90,6 +90,13 @@ cp .env.example .env      # add GEMINI_API_KEY (and optionally SARVAM_API_KEY)
 
 The **Preflight** banner in the UI reports anything missing, with the fix.
 
+**Optional — GPU overlap rescue.** `modal deploy modal_sepformer.py` once, and
+the clean step runs SepFormer on a Modal T4 (~minutes for a 2 h podcast instead
+of hours), fanning windows out over up to 8 containers. Without it, the step
+falls back to batched local CPU automatically. Separated windows are cached per
+job, so additional speakers reuse the first speaker's separation work.
+Force a backend with `VTS_SEPFORMER_BACKEND=cpu|modal` (default: auto).
+
 ---
 
 ## Use it — browser

@@ -1,64 +1,167 @@
 # voice-tag-studio
 
-Localhost workbench for preparing Hindi/Hinglish TTS training data with inline
-emotion tags. Paste a YouTube link → audio-only download → diarize → denoise →
-segment → transcribe (srota) → run tag detectors one at a time → listen to
-every intermediate + see tag placements on the transcript.
+A local data-annotation workbench for building **emotion-tagged TTS datasets** from
+Hindi/Hinglish audio — podcasts, calls, YouTube, anything with speech.
 
-## Models
+Feed it audio, and it produces training rows of the form:
 
-| Step | Model | Notes |
+```
+speaker: जो पिघले न [hesitates] देखा जाए तो [pauses] पर आप तो मतलब आप बोलते हो
+```
+
+…paired with the exact voice clip. Run it in a browser to inspect every decision
+by ear, or headless over a folder of files.
+
+<!-- screenshot -->
+![voice-tag-studio](docs/screenshot.png)
+
+---
+
+## Pipeline
+
+```
+ingest → diarize → [clean] → segment → asr → align → detectors → export
+```
+
+| stage | what it does | model |
 |---|---|---|
-| Diarization | `pyannote/speaker-diarization-community-1` | **gated** — accept terms on its HF page once |
-| Denoise | demucs `htdemucs` vocals stem | listening/QA only; fallback ffmpeg `afftdn` |
-| ASR | `Surajgameramp/srota` (qwen3-asr-0.6b Hinglish FT) | runs in `.venv-asr` (transformers pin) |
-| Word timings | torchaudio `MMS_FA` + uroman | + `pyannote/segmentation-3.0` VAD |
-| [laughs] | PANNs CNN14 SED (AudioSet) | ~1.1 GB checkpoint auto-downloads |
+| **ingest** | YouTube URL or uploaded file → archival master + 16 kHz working wav | yt-dlp, ffmpeg |
+| **diarize** | who speaks when | `pyannote/speaker-diarization-community-1` (MPS) |
+| **clean** *(optional)* | rescues overlapped speech instead of discarding it | SepFormer + ECAPA purity gate |
+| **segment** | turns → 2–20 s single-voice clips (crosstalk removed, edges trimmed) | interval math, no model |
+| **asr** | verbatim Hinglish transcript, **fillers preserved** | Gemini 2.5 Flash (or srota / Sarvam) |
+| **align** | word-level timestamps, unaligned-speech "islands" | torchaudio `MMS_FA` + uroman |
+| **detectors** | emotion tag candidates | see below |
+| **export** | `dataset.jsonl` — clip + tagged text + speaker × tag matrix | — |
 
-## Policy (carried over from the voice project)
+Nothing runs automatically except ingest: **every stage runs when you click it**,
+so you can inspect the output before moving on.
 
-- The bestaudio **master download is archival** — never modified; 16 kHz mono
-  PCM_16 is the working format cut from it.
-- **Denoised audio never enters the dataset** and detectors read the ORIGINAL
-  by default (htdemucs strips laughter — exactly what we tag).
-- Precision over recall: candidates are cheap, wrong tags are poison. The
-  audition ear is the gate.
-- Tagged events stay EMBEDDED in flowing speech: segment reruns treat detected
-  events ±0.5 s as no-cut zones.
+---
+
+## Emotion tags
+
+| family | tags | detector |
+|---|---|---|
+| **reactions** | `[laughs]` `[sigh]` `[gasps]` | PANNs CNN14 sound-event detection (AudioSet) |
+| **beats** | `[pauses]` `[hesitates]` `[stammers]` | rules over forced alignment — deterministic, free |
+| **vocal effort** | `[whispers]` | voiced-frame ratio (physics, language-independent) |
+| **tone** | `[flatly]` `[cheerfully]` | per-speaker pitch percentiles |
+| **states** | `[excited]` `[nervous]` `[frustrated]` `[sorrowful]` `[calm]` | audeering wav2vec2 arousal/valence, per-speaker percentiles |
+
+Positioned tags (reactions, beats) render **inline** at the moment they occur;
+utterance-level tags (tone, effort, states) render at the **start** of the line.
+
+**These are candidates, not labels.** Reliability drops down the table: beats are
+deterministic timing maths, states use an English-trained model on Hindi and are
+marked weak evidence. Audition before trusting — thresholds live in
+`studio/config.py::TAG_THRESHOLDS` and are meant to be tuned by ear.
+
+---
 
 ## Setup
 
+Requires Python 3.11+, `ffmpeg`, and a Hugging Face account.
+
 ```bash
-# main env (conda base python): fastapi yt-dlp demucs panns_inference noisereduce
 pip install -r requirements-main.txt
 
-# isolated ASR env (qwen-asr pins transformers==4.57.6 which breaks pyannote 4.x)
-python3 -m venv .venv-asr
-.venv-asr/bin/pip install -r requirements-asr.txt
+# ASR worker needs its own venv (qwen-asr pins transformers 4.57, which
+# conflicts with pyannote 4.x). Only needed if you use the srota engine.
+python3 -m venv .venv-asr && .venv-asr/bin/pip install -r requirements-asr.txt
 
-# one-time gates/downloads
-#   https://huggingface.co/pyannote/speaker-diarization-community-1  -> accept terms
-hf download Surajgameramp/srota
+# one-time: accept the gated diarization model
+open https://huggingface.co/pyannote/speaker-diarization-community-1
+hf auth login
 
-cp /path/to/.env .env    # SARVAM_API_KEY=... (optional ASR fallback)
+cp .env.example .env      # add GEMINI_API_KEY (and optionally SARVAM_API_KEY)
 ```
 
-## Run
+The **Preflight** banner in the UI reports anything missing, with the fix.
+
+---
+
+## Use it — browser
 
 ```bash
 python server.py          # http://127.0.0.1:8765
 ```
 
-`GET /api/preflight` (also shown in the UI banner) reports anything missing.
+1. **Upload audio** (short clips are ideal) or paste a **YouTube URL** → ingest runs.
+2. Click **diarize**. Speaker lanes appear — click a lane name to hear only that voice,
+   or name it (`agent`, `khushi`) since `SPEAKER_00` is an arbitrary label.
+3. *(optional)* Click **clean** on a speaker to rescue their overlapped speech.
+4. Click **segment** → **asr** → **align**. The Segments view shows each clip's
+   waveform beside its words, which highlight karaoke-style as it plays.
+5. **Tags** section: pick a detector, **Run detector**, then audition each hit
+   with ▶ ±2s. Tags also appear inline in the transcript at their exact position.
+6. Click **export** → `jobs/<id>/manifests/dataset.jsonl`.
 
-## Layout
+**Quality flags** shown per clip — nothing is silently dropped:
+`rescued N%` (share of separated audio) · `impure 0.54` (voice mismatch) ·
+`✂ start/end` (word cut in half) · `deva/lat %` (Hinglish script mix) ·
+`digits_uncertain` (unaligned audio explained by digits).
 
-- `server.py` — FastAPI + single runner thread; stages resume by manifest
-- `studio/stages/` — s0 ingest → s1 diarize → s2 denoise → s3 segment → s4 asr → s5 align
-- `studio/detectors/` — pluggable; `registry.py` lists them (`laughs` first)
-- `workers/asr_worker.py` — runs under `.venv-asr`, one model load per batch
-- `jobs/<video_id>/` — master.*, audio/{original,denoised}.wav,
-  audio/speakers/*.wav, segments/, peaks/, manifests/*.jsonl
+---
 
-Manifest schemas are documented in `studio/manifests.py` and stay compatible
-with the old repo's `podcast_pipeline/common.py`.
+## Use it — batch
+
+```bash
+# a folder of calls, with detectors and overlap rescue
+python run_batch.py calls/ --clean --detectors beats,laughs,tones,states
+
+# YouTube
+python run_batch.py "https://youtu.be/XXXXXXXXXXX" --detectors beats
+
+# merge every processed job into one portable corpus
+python run_batch.py --collect-only --out corpus/
+```
+
+`--collect-only --out` copies the clips beside a combined `dataset.jsonl` and
+prints the **speaker × tag matrix** — the artifact that tells you which
+(speaker, tag) cells are interpolation at inference time and which are
+extrapolation.
+
+---
+
+## Output
+
+`dataset.jsonl`, one row per clip:
+
+```json
+{
+  "sample_id": "EOKZrphv3QI_SPEAKER_01_0007",
+  "speaker": "SPEAKER_01",
+  "line": "SPEAKER_01: जो पिघले न [hesitates] देखा जाए तो [pauses] पर आप तो...",
+  "text": "जो पिघले न [hesitates] देखा जाए तो [pauses] पर आप तो...",
+  "text_plain": "जो पिघले न देखा जाए तो पर आप तो...",
+  "tags": ["hesitates", "pauses"],
+  "wav": "segments/SPEAKER_01/EOKZrphv3QI_SPEAKER_01_0007.wav",
+  "dur": 17.9, "split": "train",
+  "source": "clean:sepformer", "separated_frac": 0.13,
+  "purity": 0.83, "align_status": "filler_suspect", "clipped": []
+}
+```
+
+Every row carries its provenance and quality flags, so any filtered subset is
+reproducible without re-running anything. Clips are 16 kHz mono PCM_16; the
+original best-quality download is always kept as `master.*`.
+
+---
+
+## Design rules
+
+Carried over from the production voice pipeline this grew out of:
+
+- **Precision over recall.** A wrong tag is a text↔audio mismatch — hallucination
+  fuel. A missed tag is merely unused data.
+- **Never train on two voices.** Other speakers' turns are subtracted with a guard
+  band; overlap is dropped unless separation passes a voiceprint gate.
+- **Separated audio is a repair, not a replacement.** Solo speech always keeps the
+  original; only genuinely overlapped seconds are reconstructed, and they stay flagged.
+- **Per-speaker percentiles** for anything prosodic — never absolute thresholds.
+- **Split by video, never by segment** — same-conversation leakage is invisible
+  and fatal.
+- **Neutral rows matter.** A speaker needs untagged rows for tags to mean anything.
+
+`DETECTOR_EVAL_PLAN.md` tracks the model bake-offs still to run.

@@ -21,7 +21,7 @@ from .manifests import read_json, write_json
 # denoise removed from the pipeline (2026-08-07): it fed nothing downstream —
 # the dataset and detectors read the original, and per-speaker separation is
 # now the on-demand SF/SAM clean-lane path.
-STAGE_ORDER = ["ingest", "diarize", "segment", "asr", "align"]
+STAGE_ORDER = ["ingest", "diarize", "segment", "asr", "align", "export"]
 
 # stage -> marker path (relative to job dir) proving the stage completed
 MARKERS = {
@@ -30,6 +30,7 @@ MARKERS = {
     "segment": "manifests/segments.jsonl",
     "asr": "manifests/transcripts.jsonl",
     "align": "manifests/alignments.jsonl",
+    "export": "manifests/dataset.jsonl",
 }
 
 _YT_ID_RE = re.compile(

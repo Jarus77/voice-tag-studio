@@ -5,3 +5,5 @@ __pycache__/
 .env
 .DS_Store
 _demucs/
+server.log
+docs/screenshot.png.tmp

@@ -46,6 +46,40 @@ NO_CUT_ZONE_PAD_S = 0.5   # protection window around detected tag events
 SARVAM_URL = "https://api.sarvam.ai/speech-to-text"
 SARVAM_MODEL = "saaras:v3"
 
+# ---- export ----
+# Per-tag accept thresholds: a candidate becomes a TAG in the exported text
+# only at/above these. PROVISIONAL — calibrate each by auditioning ~25 hits
+# and moving the number until hand-precision is ~90% (precision over recall:
+# a wrong tag is a text/audio mismatch, i.e. hallucination fuel; a missed tag
+# is merely unused data).
+TAG_THRESHOLDS = {
+    # reactions — PANNs probabilities
+    "laughs": 0.20, "sigh": 0.10, "gasps": 0.10,
+    # beats — rule scores (pauses: 0.25 == a 0.5s gap)
+    "pauses": 0.25, "hesitates": 0.50, "stammers": 0.50,
+    # effort / tone / states — percentile confidences
+    "whispers": 0.60, "flatly": 0.60, "cheerfully": 0.60,
+    "excited": 0.60, "nervous": 0.60, "frustrated": 0.60,
+    "sorrowful": 0.60, "calm": 0.60,
+}
+
+# Tags that describe the WHOLE utterance render at the start of the line;
+# everything else renders inline at its detected position.
+UTTERANCE_TAGS = {"whispers", "flatly", "cheerfully", "deadpan", "playfully",
+                  "excited", "nervous", "frustrated", "sorrowful", "calm",
+                  "resigned"}
+
+# Clip filters — all OFF by default (user decision 2026-08-08: keep every clip
+# and ablate later). Each row carries its flags so any subset is reproducible.
+EXPORT_EXCLUDE = {
+    "impure": False,        # purity below PURITY_OK
+    "clipped": False,       # first/last word cut in half
+    "separated": False,     # contains SepFormer-rescued overlap audio
+    "major_gap": False,     # audible speech with no transcript
+    "align_error": False,
+    "no_text": True,        # a clip with no transcript can never be a row
+}
+
 
 def load_env() -> None:
     env_path = ROOT / ".env"

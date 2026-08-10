@@ -22,7 +22,8 @@ from studio.config import (ASR_VENV_PY, DETECTOR_SOURCE_DEFAULT,
 from studio.detectors.registry import DETECTORS
 from studio.jobs import MARKERS, STAGE_ORDER, JobStore, video_id_from_url
 from studio.manifests import read_json, read_jsonl, write_jsonl
-from studio.stages import s0_ingest, s1_diarize, s3_segment, s4_asr, s5_align
+from studio.stages import (s0_ingest, s1_diarize, s3_segment, s4_asr,
+                          s5_align, s6_export)
 
 load_env()
 app = FastAPI(title="voice-tag-studio")
@@ -34,6 +35,7 @@ STAGE_FNS = {
     "segment": s3_segment.run,
     "asr": s4_asr.run,
     "align": s5_align.run,
+    "export": s6_export.run,
 }
 
 

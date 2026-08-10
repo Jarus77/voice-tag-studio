@@ -135,7 +135,7 @@ def run(job_dir: Path, report) -> None:
         others = [iv for o, tv in all_turns.items() if o != spk for iv in tv]
         forbidden = _forbidden_regions(job_dir, spk, source, others, guard)
         rescued = _rescued_regions(job_dir, spk)
-        audio = None                     # lazy-load per speaker
+        wavs: dict[Path, object] = {}    # lazy-load lane / original
         n_spk = 0
 
         for ch in [c for c in chunks if c["speaker"] == spk]:
@@ -263,8 +263,20 @@ def run(job_dir: Path, report) -> None:
                     dropped_short["s"] += max(0.0, te - ts)
                     continue
 
-                if audio is None:
-                    audio, _sr = sf.read(lane, dtype="float32")
+                # audio source: the lane zeroes everything outside this
+                # speaker's turns, so a clip spanning a pause carries hard
+                # room-tone dropouts ("cracked" sound). When the window is
+                # verifiably solo in the ORIGINAL recording (no other-speaker
+                # turn, no rescued overlap), cut from the original — natural,
+                # continuous audio. The lane remains only for windows where a
+                # short backchannel hides inside a bridge (its zeroing is the
+                # protection there).
+                solo = (_overlap_s(ts, te, others) == 0.0
+                        and _overlap_s(ts, te, rescued) == 0.0)
+                src_wav = job_dir / "audio" / "original.wav" if solo else lane
+                if src_wav not in wavs:
+                    wavs[src_wav], _sr = sf.read(src_wav, dtype="float32")
+                audio = wavs[src_wav]
                 seg_id = f"{vid}_{spk}_{n_spk:04d}"
                 dest = seg_dir / spk / f"{seg_id}.wav"
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -299,7 +311,7 @@ def run(job_dir: Path, report) -> None:
                     "dur": round(te - ts, 3),
                     "wav": f"segments/{spk}/{seg_id}.wav",
                     "over_len": bool(te - ts > MAX_SEG_S),
-                    "source": source,
+                    "source": "original" if solo else source,
                     "separated": bool(sep_s > 0.05),
                     "separated_s": round(sep_s, 2),
                     "separated_frac": round(sep_s / (te - ts), 3),

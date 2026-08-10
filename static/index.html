@@ -73,7 +73,7 @@
     <label class="hint" style="margin-left:auto"><input type="checkbox" id="showWordTimes" style="vertical-align:-2px"> show word times</label>
   </div>
   <div class="legend">
-    <span><b class="lg-resc">rescued 12%</b> = that share is SepFormer-reconstructed overlap audio — kept for transcripts/tags but <b>excluded from training rows</b> (audible artifacts)</span>
+    <span><b class="lg-resc">rescued 12%</b> = SepFormer-reconstructed overlap audio inside the clip. Should not appear: clips are cut <b>around</b> rescued regions (reconstruction only feeds ASR/alignment, never training audio) — if you see it, the clip predates that rule; re-run segment</span>
     <span><b class="lg-imp">impure 0.54</b> = voice match to this speaker's own voiceprint is below 0.55 — listen: crosstalk, wrong speaker, or a false alarm</span>
     <span><b class="lg-imp">✂ start/end</b> = the first/last word runs into the clip edge — probably cut in half</span>
     <span><b class="lg-plain">digits_uncertain</b> = the clip has unaligned audio, but the text contains digits (87,000 · 10-15%) which forced alignment can't time — usually harmless. Dotted-underlined words are those untimed tokens.</span>
@@ -105,6 +105,6 @@
   <audio id="player" controls preload="metadata"></audio>
 </div>
 
-<script src="app.js?v=39"></script>
+<script src="app.js?v=40"></script>
 </body>
 </html>

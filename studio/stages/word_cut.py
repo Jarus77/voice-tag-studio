@@ -45,20 +45,26 @@ def _forbidden_regions(job_dir: Path, speaker: str, source: str,
     """Time regions a clip must NOT include.
 
     masked lane: every other-speaker turn ±guard (overlap = two voices mixed).
-    clean lane:  only the purity-FAILED windows (their separation was
-                 reverted to original = mixed audio); passed windows are the
-                 rescued overlap and are allowed."""
+    clean lane:  purity-FAILED windows (their separation was reverted to
+                 original = mixed audio) AND the rescued regions themselves —
+                 SepFormer-reconstructed audio has audible artifacts, so clips
+                 cut around it; everything that remains is genuine original
+                 audio. Rescue still pays off through ASR/alignment, which DO
+                 read the reconstructed seconds."""
     if source == "masked":
         return merge_close([(a - guard, b + guard) for a, b in others], 0.0)
+    RESCUE_PAD_S = 0.06          # keep the 20 ms paste crossfades out too
     slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower())
     for name in (f"clean_purity_{slug}_sepformer.json",
                  f"clean_purity_{slug}_sam.json", f"clean_purity_{slug}.json"):
         p = job_dir / "manifests" / name
         if p.exists():
             d = json.loads(p.read_text())
-            return merge_close([(w["start"], w["end"])
-                                for w in d.get("windows", [])
-                                if w.get("pass") is False], 0.0)
+            bad = [(w["start"], w["end"]) for w in d.get("windows", [])
+                   if w.get("pass") is False]
+            bad += [(a - RESCUE_PAD_S, b + RESCUE_PAD_S)
+                    for a, b in d.get("rescued_regions", [])]
+            return merge_close(bad, 0.0)
     return []
 
 
@@ -194,6 +200,23 @@ def run(job_dir: Path, report) -> None:
 
             # ---- emit clips ----
             for g in final:
+                # an edge word whose outside neighbour is too close can never
+                # get a clean cut (the boundary would land inside a word or
+                # within CLIPPED_EDGE of it). Sacrifice that word, keep the
+                # clip — better than emitting a `clipped` row the export gate
+                # then drops whole.
+                while g:
+                    prev = words[g[0] - 1]["end"] if g[0] > 0 else -1e12
+                    if prev + EDGE_GAP_S <= words[g[0]]["start"] - CLIPPED_EDGE_S:
+                        break
+                    g = g[1:]
+                while g:
+                    nxt = words[g[-1] + 1]["start"] if g[-1] + 1 < len(words) else 1e12
+                    if words[g[-1]]["end"] + CLIPPED_EDGE_S <= nxt - EDGE_GAP_S:
+                        break
+                    g = g[:-1]
+                if not g:
+                    continue
                 w0, w1 = words[g[0]], words[g[-1]]
                 dur_words = w1["end"] - w0["start"]
                 if dur_words < min_seg:

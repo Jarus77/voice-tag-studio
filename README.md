@@ -173,8 +173,9 @@ Carried over from the production voice pipeline this grew out of:
   fuel. A missed tag is merely unused data.
 - **Never train on two voices.** Other speakers' turns are subtracted with a guard
   band; overlap is dropped unless separation passes a voiceprint gate.
-- **Separated audio is a repair, not a replacement.** Solo speech always keeps the
-  original; only genuinely overlapped seconds are reconstructed, and they stay flagged.
+- **Separated audio is a working surface, never training audio.** SepFormer's
+  reconstruction feeds ASR and alignment (so transcripts survive overlap), but
+  clips are cut *around* rescued regions — every trained second is original audio.
 - **Per-speaker percentiles** for anything prosodic — never absolute thresholds.
 - **Split by video, never by segment** — same-conversation leakage is invisible
   and fatal.

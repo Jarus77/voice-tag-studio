@@ -90,12 +90,18 @@ cp .env.example .env      # add GEMINI_API_KEY (and optionally SARVAM_API_KEY)
 
 The **Preflight** banner in the UI reports anything missing, with the fix.
 
-**Optional — GPU overlap rescue.** `modal deploy modal_sepformer.py` once, and
-the clean step runs SepFormer on a Modal T4 (~minutes for a 2 h podcast instead
-of hours), fanning windows out over up to 8 containers. Without it, the step
-falls back to batched local CPU automatically. Separated windows are cached per
-job, so additional speakers reuse the first speaker's separation work.
-Force a backend with `VTS_SEPFORMER_BACKEND=cpu|modal` (default: auto).
+**Optional — GPU acceleration** (each a one-time deploy; every stage
+auto-detects its app and falls back to local compute when missing):
+
+```bash
+modal deploy modal_sepformer.py   # clean: SepFormer on T4 — minutes, not hours
+modal deploy modal_align.py       # align: MMS forced alignment on T4
+```
+
+Separated windows are cached per job, so additional speakers reuse the first
+speaker's separation work. Force backends with `VTS_SEPFORMER_BACKEND` /
+`VTS_ALIGN_BACKEND` = `cpu|modal` (default: auto). ASR concurrency is tunable
+with `VTS_ASR_CONCURRENCY` (default 16 parallel Gemini calls).
 
 ---
 

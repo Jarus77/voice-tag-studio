@@ -3,6 +3,12 @@
 Produces word timestamps on the LANE TIMELINE (absolute seconds), which the
 cut stage then uses as the authority for where clips may begin and end.
 
+The heavy half (wav2vec2 emissions + span decode) runs on the deployed
+`voice-tag-align` Modal GPU app when available — chunks are spawned in batches
+across containers — and falls back to local MPS/CPU otherwise
+(VTS_ALIGN_BACKEND=auto|modal|local). Romanization, VAD and island logic are
+always local.
+
 Output: manifests/lane_alignments.jsonl, one row per chunk:
     {speaker, chunk_id, start, end, tokens: [...],
      words: [{i, w, start, end}]   (ABSOLUTE lane seconds; i = token index),
@@ -12,6 +18,7 @@ Output: manifests/lane_alignments.jsonl, one row per chunk:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -23,7 +30,58 @@ from .lane_asr import CHUNK_PAD_S, lane_wav_for
 from .s5_align import Aligner
 
 
+def _modal_spans(todo, wavs, prep, report) -> dict:
+    """Word spans for every alignable chunk via the Modal GPU app.
+    Returns {chunk_id: [[a, b], ...] | {"error": ...}}. Raises on app-level
+    failure so the caller can fall back to local."""
+    import io
+
+    import modal
+    import numpy as np
+    import soundfile as sf
+    A = modal.Cls.from_name("voice-tag-align", "Aligner")()
+
+    items = []                                # (todo_idx, audio, words)
+    for i, (words, _idx, _skip) in enumerate(prep):
+        if not words:
+            continue
+        audio, _sr = sf.read(wavs[i], dtype="float32")
+        items.append((i, audio, words))
+
+    B = 8
+    payloads: list[tuple[bytes, list[int]]] = []
+    for k in range(0, len(items), B):
+        grp = items[k:k + B]
+        T = max(len(a) for _, a, _ in grp)
+        arr = np.zeros((len(grp), T), dtype=np.float16)
+        for j, (_, a, _) in enumerate(grp):
+            arr[j, :len(a)] = a
+        buf = io.BytesIO()
+        np.savez_compressed(
+            buf, audio=arr,
+            lens=np.array([len(a) for _, a, _ in grp], dtype=np.int64),
+            words=np.frombuffer(
+                json.dumps([w for _, _, w in grp]).encode(), dtype=np.uint8))
+        payloads.append((buf.getvalue(), [i for i, _, _ in grp]))
+
+    handles = [A.align.spawn(blob) for blob, _ in payloads]
+    out, done = {}, 0
+    for h, (blob, idxs) in zip(handles, payloads):
+        try:
+            res = json.loads(h.get(timeout=600))
+        except Exception:                     # one respawn covers wedges
+            res = json.loads(A.align.spawn(blob).get(timeout=600))
+        for i, sp in zip(idxs, res):
+            out[todo[i]["chunk_id"]] = sp
+            done += 1
+        report(f"mms_fa [gpu:modal] {done}/{len(items)} chunks",
+               0.10 + 0.50 * done / len(items))
+    return out
+
+
 def run(job_dir: Path, report) -> None:
+    import os
+
     import torch
 
     chunks = read_jsonl(job_dir / "manifests" / "lane_transcripts.jsonl")
@@ -37,9 +95,12 @@ def run(job_dir: Path, report) -> None:
     todo = [c for c in chunks if (c.get("text") or "").strip()]
     rows = []
     with tempfile.TemporaryDirectory(prefix="lane_align_", dir=job_dir) as td:
-        for i, ch in enumerate(todo):
+        # cut every chunk slice up front (parallel ffmpeg), same slice the
+        # ASR heard (incl. the pad)
+        from concurrent.futures import ThreadPoolExecutor
+
+        def cut(ch):
             lane, _ = lane_wav_for(job_dir, ch["speaker"])
-            # exact same slice the ASR heard (incl. the pad)
             off = max(0.0, ch["start"] - CHUNK_PAD_S)
             dur = (ch["end"] - ch["start"]) + 2 * CHUNK_PAD_S
             wav = Path(td) / f"{ch['chunk_id']}.wav"
@@ -47,18 +108,45 @@ def run(job_dir: Path, report) -> None:
                 ["ffmpeg", "-v", "error", "-y", "-ss", f"{off:.3f}",
                  "-t", f"{dur:.3f}", "-i", str(lane),
                  "-c:a", "pcm_s16le", str(wav)], check=True)
+            return wav
 
+        report(f"cutting {len(todo)} chunk slices", 0.04)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            wavs = list(pool.map(cut, todo))
+        prep = [al.words(ch["text"].strip()) for ch in todo]
+
+        # word spans: Modal GPU first, local fallback
+        spans_by: dict = {}
+        backend = f"local:{device}"
+        mode = os.environ.get("VTS_ALIGN_BACKEND", "auto")
+        if mode in ("auto", "modal"):
+            try:
+                spans_by = _modal_spans(todo, wavs, prep, report)
+                backend = "gpu:modal"
+            except Exception as e:
+                if mode == "modal":
+                    raise
+                report(f"modal unavailable ({type(e).__name__}) — "
+                       f"local {device}", 0.10)
+
+        for i, ch in enumerate(todo):
+            off = max(0.0, ch["start"] - CHUNK_PAD_S)
+            dur = (ch["end"] - ch["start"]) + 2 * CHUNK_PAD_S
             text = ch["text"].strip()
             tokens = text.split()
-            words, tok_idx, skipped = al.words(text)
+            words, tok_idx, skipped = prep[i]
             row = {"speaker": ch["speaker"], "chunk_id": ch["chunk_id"],
                    "start": ch["start"], "end": ch["end"],
                    "tokens": tokens, "n_skipped_words": skipped}
             try:
                 if not words:
                     raise ValueError("no alignable words")
-                spans = al.word_spans(wav, words)
-                speech = al.speech_intervals(wav, dur)
+                got = spans_by.get(ch["chunk_id"])
+                if isinstance(got, dict):
+                    raise ValueError(got.get("error", "gpu align failed"))
+                spans = ([tuple(s) for s in got] if got is not None
+                         else al.word_spans(wavs[i], words))
+                speech = al.speech_intervals(wavs[i], dur)
                 cover = merge_close([(max(0.0, a - WORD_PAD_S), b + WORD_PAD_S)
                                      for a, b in spans], 0.05)
                 islands = [(a, b) for a, b in subtract_intervals(speech, cover)
@@ -85,11 +173,11 @@ def run(job_dir: Path, report) -> None:
                 row.update({"status": "align_error", "words": [], "islands": [],
                             "error": f"{type(e).__name__}: {str(e)[:120]}"})
             rows.append(row)
-            report(f"chunk {i + 1}/{len(todo)} ({ch['chunk_id']}, "
-                   f"{row['status']})", 0.05 + 0.93 * (i + 1) / len(todo))
+            report(f"vad+islands {i + 1}/{len(todo)} ({ch['chunk_id']}, "
+                   f"{row['status']})", 0.62 + 0.36 * (i + 1) / len(todo))
 
     write_jsonl(job_dir / "manifests" / "lane_alignments.jsonl", rows)
     from collections import Counter
     c = Counter(r["status"] for r in rows)
-    report(f"aligned {len(rows)} chunks · " +
+    report(f"aligned {len(rows)} chunks [{backend}] · " +
            " ".join(f"{k}:{v}" for k, v in c.items()), 1.0)

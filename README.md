@@ -12,8 +12,12 @@ speaker: जो पिघले न [hesitates] देखा जाए तो [p
 …paired with the exact voice clip. Run it in a browser to inspect every decision
 by ear, or headless over a folder of files.
 
-<!-- screenshot -->
 ![voice-tag-studio](docs/screenshot.png)
+
+*The pipeline runs stage by stage — you click each one. Below it, every version of
+the audio on one timeline: the original, a SepFormer-cleaned lane per speaker, and
+the raw diarized lanes. Amber marks show where speakers overlap; pink diamonds are
+tag hits.*
 
 ---
 
@@ -96,6 +100,13 @@ python server.py          # http://127.0.0.1:8765
 5. **Tags** section: pick a detector, **Run detector**, then audition each hit
    with ▶ ±2s. Tags also appear inline in the transcript at their exact position.
 6. Click **export** → `jobs/<id>/manifests/dataset.jsonl`.
+
+![segments and tags](docs/transcript-tag.png)
+
+*Each clip shows its waveform beside its words. Tags sit inline exactly where they
+occur — `[hesitates] 0.58s`, `[pauses] 0.72s`, `[stammers] "एक"` — with the
+quantity you can judge by ear rather than an opaque score. Words highlight
+karaoke-style during playback.*
 
 **Quality flags** shown per clip — nothing is silently dropped:
 `rescued N%` (share of separated audio) · `impure 0.54` (voice mismatch) ·

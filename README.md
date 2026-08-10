@@ -83,6 +83,11 @@ ends in a tagged dataset.
 Positioned tags (reactions, beats) render **inline** at the moment they occur;
 utterance-level tags (tone, effort, states) render at the **start** of the line.
 
+![tag audition](docs/tags.png)
+
+*Run a detector, get candidates sorted by score, play each moment with one
+click. Thresholds are tuned by what you hear.*
+
 **These are candidates, not labels.** Reliability drops down the table: beats are
 deterministic timing maths, states use an English-trained model on Hindi and are
 marked weak evidence. Audition before trusting — thresholds live in

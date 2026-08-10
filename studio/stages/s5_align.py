@@ -18,8 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ..config import (FILLER_MAX_S, MIN_ISLAND_S, MIN_SPEECH_FRAMES, SR,
-                      VAD_MODEL, WORD_PAD_S)
+from ..config import (CLIPPED_EDGE_S, FILLER_MAX_S, MIN_ISLAND_S,
+                      MIN_SPEECH_FRAMES, SR, VAD_MODEL, WORD_PAD_S)
 from ..intervals import merge_close, subtract_intervals
 from ..manifests import read_jsonl, write_jsonl
 
@@ -139,7 +139,7 @@ def run(job_dir: Path, report) -> None:
             # clipped-word check: a first/last word whose alignment runs into
             # the clip edge was very likely cut in half by segmentation
             # (split point, crosstalk subtraction, or a turn-boundary error)
-            EDGE = 0.05
+            EDGE = CLIPPED_EDGE_S
             clipped = []
             if spans:
                 if spans[0][0] <= EDGE:

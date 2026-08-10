@@ -34,6 +34,11 @@ MIN_ISLAND_S = 0.30
 FILLER_MAX_S = 1.50
 WORD_PAD_S = 0.12
 MIN_SPEECH_FRAMES = 3
+# A clip's first/last word is called "clipped" only if its alignment runs
+# essentially INTO the edge. energy_trim leaves PAD_S (0.08s) of breathing
+# room, so healthy clips sit ~0.06s off the edge — 0.05 flagged 69/101 clips
+# on real data (measured 2026-08-10); 0.015 flags ~14, a believable rate.
+CLIPPED_EDGE_S = 0.015
 
 # ---- policy toggles ----
 # Detectors read the ORIGINAL audio by default: demucs strips/attenuates

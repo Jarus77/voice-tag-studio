@@ -96,6 +96,9 @@ class JobStore:
     def _refresh_done(self, vid: str) -> None:
         """Reconcile stage status with on-disk markers (resume logic)."""
         job = self._status[vid]
+        # keep pipeline order even for jobs created before a stage existed
+        job["stages"] = {s: job.get("stages", {}).get(s, {"status": "pending"})
+                         for s in STAGE_ORDER}
         for stage, marker in MARKERS.items():
             st = job["stages"].setdefault(stage, {"status": "pending"})
             if (JOBS_DIR / vid / marker).exists():

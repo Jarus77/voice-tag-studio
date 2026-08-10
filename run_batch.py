@@ -32,10 +32,11 @@ from studio.config import JOBS_DIR, load_env                       # noqa: E402
 from studio.detectors.registry import DETECTORS                    # noqa: E402
 from studio.jobs import STAGE_ORDER, video_id_from_url             # noqa: E402
 from studio.manifests import read_json, read_jsonl, write_json, write_jsonl  # noqa: E402
-from studio.stages import (s0_ingest, s1_diarize, s3_segment,      # noqa: E402
-                           s4_asr, s5_align, s6_export)
+from studio.stages import (s0_ingest, s1_diarize, s2_clean,       # noqa: E402
+                           s3_segment, s4_asr, s5_align, s6_export)
 
-STAGES = {"diarize": s1_diarize.run, "segment": s3_segment.run,
+STAGES = {"diarize": s1_diarize.run, "clean": s2_clean.run,
+          "segment": s3_segment.run,
           "asr": s4_asr.run, "align": s5_align.run, "export": s6_export.run}
 
 
@@ -81,12 +82,16 @@ def run_job(src: str, detectors: list[str], clean: bool, force: bool) -> str | N
 
     marker = {"ingest": "manifests/stage0_video.json",
               "diarize": "manifests/speakers.jsonl",
+              "clean": "manifests/clean_lanes.json",
               "segment": "manifests/segments.jsonl",
               "asr": "manifests/transcripts.jsonl",
               "align": "manifests/alignments.jsonl",
               "export": "manifests/dataset.jsonl"}
 
     for stage in STAGE_ORDER:
+        if stage == "clean" and not clean:
+            log("  · clean    (skipped — pass --clean for overlap rescue)")
+            continue
         done = (d / marker[stage]).exists()
         if done and not force:
             log(f"  · {stage:8s} (cached)")
@@ -95,9 +100,6 @@ def run_job(src: str, detectors: list[str], clean: bool, force: bool) -> str | N
             if stage == "ingest":
                 s0_ingest.run(d, reporter(stage), url)
             else:
-                # clean lanes must exist BEFORE segment cuts, so build here
-                if stage == "segment" and clean:
-                    build_clean_lanes(d)
                 STAGES[stage](d, reporter(stage))
             log(f"  ✓ {stage}")
         except Exception as e:
@@ -121,22 +123,6 @@ def run_job(src: str, detectors: list[str], clean: bool, force: bool) -> str | N
                 except Exception as e:
                     log(f"  ✗ {name}: {type(e).__name__}: {e}")
     return vid
-
-
-def build_clean_lanes(job_dir: Path) -> None:
-    """SepFormer overlap rescue for every diarized speaker."""
-    from studio.clean_lane import build_clean_lane
-    speakers = read_jsonl(job_dir / "manifests" / "speakers.jsonl")
-    for row in speakers:
-        spk = row["speaker"]
-        import re
-        slug = re.sub(r"[^a-z0-9]+", "_", spk.lower())
-        if (job_dir / "audio" / f"sam_{slug}_clean_sepformer.wav").exists():
-            continue
-        try:
-            build_clean_lane(job_dir, reporter(f"clean/{spk}"), spk)
-        except Exception as e:
-            log(f"  ! clean lane {spk}: {type(e).__name__}: {e}")
 
 
 def collect(out: Path, copy_audio: bool = True) -> None:
@@ -184,7 +170,7 @@ def main() -> int:
     ap.add_argument("--detectors", default="",
                     help="comma list: " + ",".join(DETECTORS))
     ap.add_argument("--clean", action="store_true",
-                    help="build SepFormer clean lanes before segmenting (overlap rescue)")
+                    help="run the clean stage (SepFormer overlap rescue) before segmenting")
     ap.add_argument("--force", action="store_true", help="rerun cached stages")
     ap.add_argument("--out", type=Path, help="collect all jobs into this corpus dir")
     ap.add_argument("--collect-only", action="store_true",

@@ -14,7 +14,7 @@ const state = {
 };
 const COLORS = ["#4da3ff", "#3ecf8e", "#f0b13c", "#ef6461", "#b48ead", "#7fd1d8"];
 const STAGE_EXPLAIN = {
-  ingest: "download audio", diarize: "who speaks when", denoise: "demucs vocals",
+  ingest: "download audio", diarize: "who speaks when", clean: "sepformer overlap rescue", denoise: "demucs vocals",
   segment: "2–20s utterances", asr: "gemini verbatim", align: "word timings", export: "tagged dataset rows",
 };
 

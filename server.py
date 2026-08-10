@@ -187,6 +187,8 @@ def get_job(vid: str) -> dict:
             sources.append({"name": name, "path": f"/files/{vid}/audio/{name}.wav"})
             seen.add(name)
     for wav in sorted((job_dir / "audio").glob("*.wav")):
+        if wav.name.startswith("."):        # half-built lane, still writing
+            continue
         if wav.stem not in seen:
             sources.append({"name": wav.stem, "path": f"/files/{vid}/audio/{wav.name}"})
     for spk in sorted((job_dir / "audio" / "speakers").glob("*.wav")):

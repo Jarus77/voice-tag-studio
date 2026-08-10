@@ -246,8 +246,12 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     slug = re.sub(r"[^a-z0-9]+", "_", speaker.lower())
     name = f"sam_{slug}_clean_{engine}"
     dest = job_dir / "audio" / f"{name}.wav"
-    render_masked_track(audio, my, dest, 16000)
-    track, _ = sf.read(dest, dtype="float32")
+    # build into a temp file and rename at the end: a lane must never be
+    # readable in a half-built state (an interrupted build previously left a
+    # masked-original lane that looked finished to the segment stage)
+    tmp = job_dir / "audio" / f".{name}.building.wav"
+    render_masked_track(audio, my, tmp, 16000)
+    track, _ = sf.read(tmp, dtype="float32")
 
     report("computing speaker centroid", 0.08)
     centroid = speaker_centroid(audio, my, others)
@@ -305,8 +309,10 @@ def build_clean_lane(job_dir: Path, report, speaker: str,
     purity["rescued_regions"] = [[round(s, 2), round(e, 2)]
                                  for s, e in merge_close(rescued_regions, 0.05)]
 
-    sf.write(dest, track, 16000, subtype="PCM_16")
-    (job_dir / "peaks" / f"{name}.json").unlink(missing_ok=True)
+    sf.write(tmp, track, 16000, subtype="PCM_16")
+    tmp.replace(dest)                      # atomic: now the lane exists
+    for stale in (job_dir / "peaks").glob(f"{name}.*.json"):
+        stale.unlink(missing_ok=True)
     n_pass = sum(1 for w in purity["windows"] if w["pass"])
     n_scored = sum(1 for w in purity["windows"] if w["pass"] is not None)
     resc_s = sum(e - s for s, e in merge_close(rescued_regions, 0.05))

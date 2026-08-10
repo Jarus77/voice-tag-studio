@@ -21,16 +21,18 @@ from .manifests import read_json, write_json
 # denoise removed from the pipeline (2026-08-07): it fed nothing downstream —
 # the dataset and detectors read the original, and per-speaker separation is
 # now the on-demand SF/SAM clean-lane path.
-STAGE_ORDER = ["ingest", "diarize", "clean", "segment", "asr", "align", "export"]
+# 2026-08-10 inversion: transcription+alignment happen on LANES before
+# cutting, so clip boundaries can only land in verified word gaps
+STAGE_ORDER = ["ingest", "diarize", "clean", "asr", "align", "segment", "export"]
 
 # stage -> marker path (relative to job dir) proving the stage completed
 MARKERS = {
     "ingest": "manifests/stage0_video.json",
     "diarize": "manifests/speakers.jsonl",
     "clean": "manifests/clean_lanes.json",
+    "asr": "manifests/lane_transcripts.jsonl",
+    "align": "manifests/lane_alignments.jsonl",
     "segment": "manifests/segments.jsonl",
-    "asr": "manifests/transcripts.jsonl",
-    "align": "manifests/alignments.jsonl",
     "export": "manifests/dataset.jsonl",
 }
 

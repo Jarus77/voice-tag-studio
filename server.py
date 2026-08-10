@@ -22,8 +22,8 @@ from studio.config import (ASR_VENV_PY, DETECTOR_SOURCE_DEFAULT,
 from studio.detectors.registry import DETECTORS
 from studio.jobs import MARKERS, STAGE_ORDER, JobStore, video_id_from_url
 from studio.manifests import read_json, read_jsonl, write_jsonl
-from studio.stages import (s0_ingest, s1_diarize, s2_clean, s3_segment,
-                          s4_asr, s5_align, s6_export)
+from studio.stages import (lane_align, lane_asr, s0_ingest, s1_diarize,
+                          s2_clean, s6_export, word_cut)
 
 load_env()
 app = FastAPI(title="voice-tag-studio")
@@ -33,9 +33,9 @@ STAGE_FNS = {
     "ingest": None,  # bound per-job with its URL below
     "diarize": s1_diarize.run,
     "clean": s2_clean.run,
-    "segment": s3_segment.run,
-    "asr": s4_asr.run,
-    "align": s5_align.run,
+    "asr": lane_asr.run,
+    "align": lane_align.run,
+    "segment": word_cut.run,
     "export": s6_export.run,
 }
 
@@ -245,8 +245,8 @@ def rerun_stage(vid: str, stage: str, force: bool = False,
     if job is None:
         raise HTTPException(404, "no such job")
     if stage == "asr" and engine:
-        if engine not in ("srota", "sarvam", "gemini"):
-            raise HTTPException(400, "engine must be srota, sarvam or gemini")
+        if engine not in ("srota", "gemini"):
+            raise HTTPException(400, "engine must be gemini or srota (lane mode)")
         store.set_field(vid, "asr_engine", engine)
     if stage == "diarize" and engine:
         if engine not in DIARIZERS:

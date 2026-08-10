@@ -24,17 +24,22 @@ tag hits.*
 ## Pipeline
 
 ```
-ingest → diarize → [clean] → segment → asr → align → detectors → export
+ingest → diarize → [clean] → asr → align → segment → detectors → export
 ```
+
+Transcription happens **before** cutting: each speaker's lane is transcribed in
+~60 s chunks and force-aligned, and clips are then cut **only in verified gaps
+between words**. Text↔audio match holds by construction — a boundary can never
+truncate a word, because word positions are known before any cut is made.
 
 | stage | what it does | model |
 |---|---|---|
 | **ingest** | YouTube URL or uploaded file → archival master + 16 kHz working wav | yt-dlp, ffmpeg |
 | **diarize** | who speaks when | `pyannote/speaker-diarization-community-1` (MPS) |
 | **clean** *(optional)* | rescues overlapped speech instead of discarding it | SepFormer + ECAPA purity gate |
-| **segment** | turns → 2–20 s single-voice clips (crosstalk removed, edges trimmed) | interval math, no model |
-| **asr** | verbatim Hinglish transcript, **fillers preserved** | Gemini 2.5 Flash (or srota / Sarvam) |
-| **align** | word-level timestamps, unaligned-speech "islands" | torchaudio `MMS_FA` + uroman |
+| **asr** | verbatim Hinglish lane transcript in ~60 s chunks, **fillers preserved** | Gemini 2.5 Flash (or srota) |
+| **align** | word-level timestamps on the lane, unaligned-speech "islands" | torchaudio `MMS_FA` + uroman |
+| **segment** | cuts 2–20 s clips **only in verified word gaps**; clip text is derived from the aligned words inside it | word timings, no model |
 | **detectors** | emotion tag candidates | see below |
 | **export** | `dataset.jsonl` — clip + tagged text + speaker × tag matrix | — |
 
@@ -95,7 +100,7 @@ python server.py          # http://127.0.0.1:8765
 2. Click **diarize**. Speaker lanes appear — click a lane name to hear only that voice,
    or name it (`agent`, `khushi`) since `SPEAKER_00` is an arbitrary label.
 3. *(optional)* Click **clean** on a speaker to rescue their overlapped speech.
-4. Click **segment** → **asr** → **align**. The Segments view shows each clip's
+4. Click **asr** → **align** → **segment**. The Segments view shows each clip's
    waveform beside its words, which highlight karaoke-style as it plays.
 5. **Tags** section: pick a detector, **Run detector**, then audition each hit
    with ▶ ±2s. Tags also appear inline in the transcript at their exact position.

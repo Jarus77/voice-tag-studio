@@ -14,8 +14,9 @@ const state = {
 };
 const COLORS = ["#4da3ff", "#3ecf8e", "#f0b13c", "#ef6461", "#b48ead", "#7fd1d8"];
 const STAGE_EXPLAIN = {
-  ingest: "download audio", diarize: "who speaks when", clean: "sepformer overlap rescue", denoise: "demucs vocals",
-  segment: "2–20s utterances", asr: "gemini verbatim", align: "word timings", export: "tagged dataset rows",
+  ingest: "download audio", diarize: "who speaks when", clean: "sepformer overlap rescue",
+  asr: "lane transcription", align: "lane word timings", denoise: "demucs vocals",
+  segment: "cut at word gaps", export: "tagged dataset rows",
 };
 
 /* ---------------- boot ---------------- */
@@ -629,12 +630,12 @@ async function loadManifests() {
     state.segments = (await get("segments.jsonl")) || [];
     mark("segments.jsonl", "segments"); dirty = true;
   }
-  if (st.asr?.status === "done" && stale("transcripts.jsonl", "transcripts")) {
+  if (st.segment?.status === "done" && stale("transcripts.jsonl", "transcripts")) {
     const rows = (await get("transcripts.jsonl")) || [];
     state.transcripts = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
     mark("transcripts.jsonl", "transcripts"); dirty = true;
   }
-  if (st.align?.status === "done" && stale("alignments.jsonl", "alignments")) {
+  if (st.segment?.status === "done" && stale("alignments.jsonl", "alignments")) {
     const rows = (await get("alignments.jsonl")) || [];
     state.alignments = Object.fromEntries(rows.map((r) => [r.seg_id, r]));
     mark("alignments.jsonl", "alignments"); dirty = true;
@@ -671,7 +672,7 @@ function renderEmptyStates() {
     return `appears after the <b>${need}</b> stage (${s})`;
   };
   $("transcriptEmpty").innerHTML = state.segments.length
-    ? (Object.keys(state.transcripts).length ? "" : waitTxt("asr"))
+    ? (Object.keys(state.transcripts).length ? "" : waitTxt("segment"))
     : waitTxt("segment");
   const nImpure = state.segments.filter((s) => s.purity != null && !s.purity_pass).length;
   const nClip = Object.values(state.alignments).filter((a) => a.clipped?.length).length;

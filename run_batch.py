@@ -32,12 +32,12 @@ from studio.config import JOBS_DIR, load_env                       # noqa: E402
 from studio.detectors.registry import DETECTORS                    # noqa: E402
 from studio.jobs import STAGE_ORDER, video_id_from_url             # noqa: E402
 from studio.manifests import read_json, read_jsonl, write_json, write_jsonl  # noqa: E402
-from studio.stages import (s0_ingest, s1_diarize, s2_clean,       # noqa: E402
-                           s3_segment, s4_asr, s5_align, s6_export)
+from studio.stages import (lane_align, lane_asr, s0_ingest,       # noqa: E402
+                           s1_diarize, s2_clean, s6_export, word_cut)
 
 STAGES = {"diarize": s1_diarize.run, "clean": s2_clean.run,
-          "segment": s3_segment.run,
-          "asr": s4_asr.run, "align": s5_align.run, "export": s6_export.run}
+          "asr": lane_asr.run, "align": lane_align.run,
+          "segment": word_cut.run, "export": s6_export.run}
 
 
 def log(msg: str) -> None:
@@ -83,9 +83,9 @@ def run_job(src: str, detectors: list[str], clean: bool, force: bool) -> str | N
     marker = {"ingest": "manifests/stage0_video.json",
               "diarize": "manifests/speakers.jsonl",
               "clean": "manifests/clean_lanes.json",
+              "asr": "manifests/lane_transcripts.jsonl",
+              "align": "manifests/lane_alignments.jsonl",
               "segment": "manifests/segments.jsonl",
-              "asr": "manifests/transcripts.jsonl",
-              "align": "manifests/alignments.jsonl",
               "export": "manifests/dataset.jsonl"}
 
     for stage in STAGE_ORDER:
@@ -107,7 +107,7 @@ def run_job(src: str, detectors: list[str], clean: bool, force: bool) -> str | N
             traceback.print_exc()
             return None
 
-        if stage == "align" and detectors:      # detectors feed the export
+        if stage == "segment" and detectors:    # detectors feed the export
             for name in detectors:
                 det = DETECTORS.get(name)
                 if det is None:

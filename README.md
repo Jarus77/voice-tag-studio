@@ -21,6 +21,26 @@ tag hits.*
 
 ---
 
+## Quick start (first time, from zero)
+
+```bash
+git clone https://github.com/Jarus77/voice-tag-studio && cd voice-tag-studio
+pip install -r requirements-main.txt
+cp .env.example .env               # put your GEMINI_API_KEY inside
+hf auth login                      # then accept the gated model once:
+open https://huggingface.co/pyannote/speaker-diarization-community-1
+
+python server.py                   # → http://127.0.0.1:8765
+```
+
+In the browser: paste a **YouTube link** and press **Analyze**, *or* press
+**Upload audio** for a local file — then click **Run remaining ▸** and wait.
+When every step is green, your dataset is at
+`jobs/<job-id>/manifests/dataset.jsonl` with the voice clips next to it in
+`jobs/<job-id>/segments/`. That's the whole loop; everything below is detail.
+
+---
+
 ## Pipeline
 
 ```
@@ -90,18 +110,34 @@ cp .env.example .env      # add GEMINI_API_KEY (and optionally SARVAM_API_KEY)
 
 The **Preflight** banner in the UI reports anything missing, with the fix.
 
-**Optional — GPU acceleration** (each a one-time deploy; every stage
-auto-detects its app and falls back to local compute when missing):
+---
+
+## GPU acceleration (optional, but hours → minutes)
+
+Everything runs locally by default. Two stages are heavy enough that a cloud
+GPU changes the experience — deploy each **once** with a free
+[Modal](https://modal.com) account, and the pipeline auto-detects them from
+then on (and silently falls back to local CPU/MPS if they're missing):
 
 ```bash
-modal deploy modal_sepformer.py   # clean: SepFormer on T4 — minutes, not hours
-modal deploy modal_align.py       # align: MMS forced alignment on T4
+pip install modal && modal setup   # one-time account link
+modal deploy modal_sepformer.py    # accelerates the clean step
+modal deploy modal_align.py        # accelerates the align step
 ```
 
-Separated windows are cached per job, so additional speakers reuse the first
-speaker's separation work. Force backends with `VTS_SEPFORMER_BACKEND` /
-`VTS_ALIGN_BACKEND` = `cpu|modal` (default: auto). ASR concurrency is tunable
-with `VTS_ASR_CONCURRENCY` (default 16 parallel Gemini calls).
+Measured on a 2-hour Hindi podcast (Apple-Silicon laptop + Modal T4s):
+
+| stage | local CPU | with GPU apps |
+|---|---|---|
+| clean (SepFormer overlap rescue) | many hours | **3.5 min** |
+| asr (Gemini, 16-way parallel) | — | **~2 min** |
+| align (MMS forced alignment) | ~45 min | **~5 min** |
+| **whole pipeline, upload → dataset** | overnight | **~17 min** |
+
+Knobs (env vars): `VTS_SEPFORMER_BACKEND` / `VTS_ALIGN_BACKEND` =
+`auto|modal|cpu` (default auto) · `VTS_ASR_CONCURRENCY` (default 16).
+Separated windows are cached per job (`manifests/sep_cache/`), so the second
+speaker of a recording reuses the first speaker's separation work.
 
 ---
 
@@ -146,13 +182,16 @@ visible in the UI but never become dataset rows. `impure` (voiceprint below
 ## Use it — batch
 
 ```bash
+# one local audio file
+python run_batch.py call.mp3 --detectors beats
+
 # a folder of calls, with detectors and overlap rescue
 python run_batch.py calls/ --clean --detectors beats,laughs,tones,states
 
-# YouTube
+# a YouTube link
 python run_batch.py "https://youtu.be/XXXXXXXXXXX" --detectors beats
 
-# merge every processed job into one portable corpus
+# merge every processed job into one portable corpus/ folder
 python run_batch.py --collect-only --out corpus/
 ```
 
@@ -160,6 +199,29 @@ python run_batch.py --collect-only --out corpus/
 prints the **speaker × tag matrix** — the artifact that tells you which
 (speaker, tag) cells are interpolation at inference time and which are
 extrapolation.
+
+---
+
+## Where your data lands
+
+Every recording becomes one folder under `jobs/`, and it is self-contained:
+
+```
+jobs/<job-id>/
+├── master.*                     original best-quality download (never touched)
+├── audio/original.wav           16 kHz working copy
+├── audio/sam_*_clean_*.wav      SepFormer clean lanes (if you ran clean)
+├── segments/SPEAKER_XX/*.wav    ← the voice clips that train
+└── manifests/
+    ├── dataset.jsonl            ← THE DELIVERABLE: one training row per clip
+    ├── matrix.json              speaker × tag counts + why rows were dropped
+    └── *.jsonl                  every intermediate (transcripts, alignments…)
+```
+
+Each row's `wav` field is relative to the job folder, so you can copy the
+folder anywhere. To merge **all** processed jobs into a single portable
+dataset, use `python run_batch.py --collect-only --out corpus/` — it copies
+the clips beside one combined `dataset.jsonl`.
 
 ---
 

@@ -29,6 +29,7 @@ from .lane_asr import lane_wav_for
 from .s4_asr import script_profile
 
 GROUP_GAP_S = 0.60        # a word gap this long separates utterance groups
+MAX_WORD_S = 2.00         # longer single word = alignment glitch, span unusable
 BRIDGE_MAX_S = 2.00       # groups may merge across a silence up to this long
 BRIDGE_FOREIGN_MAX_S = 0.60   # ...unless the other speaker talks longer than
                               # this inside the bridge (masked silence is fine
@@ -146,8 +147,20 @@ def run(job_dir: Path, report) -> None:
             own = _assign_tokens(tokens, words)
             islands = [tuple(x) for x in ch.get("islands", [])]
 
-            # words inside forbidden regions can never enter a clip
-            ok = [not (_in_any(w["start"], forbidden) or _in_any(w["end"], forbidden))
+            # a single "word" longer than MAX_WORD_S is a forced-alignment
+            # glitch (MMS stretching a token across silence) — its span is
+            # unusable audio: treat it like a forbidden region so no clip can
+            # contain it or bridge across it. Shrunk 50 ms so the words
+            # touching its edges aren't swallowed with it.
+            glitch = [(w["start"] + 0.05, w["end"] - 0.05) for w in words
+                      if w["end"] - w["start"] > MAX_WORD_S]
+            forbid = merge_close(forbidden + glitch, 0.0) if glitch else forbidden
+
+            # words inside forbidden regions can never enter a clip;
+            # glitched words are excluded by their own duration (their
+            # endpoints sit outside the shrunk glitch span)
+            ok = [w["end"] - w["start"] <= MAX_WORD_S
+                  and not (_in_any(w["start"], forbid) or _in_any(w["end"], forbid))
                   for w in words]
 
             # ---- group consecutive usable words at GROUP_GAP boundaries ----
@@ -158,7 +171,7 @@ def run(job_dir: Path, report) -> None:
                 if (groups and ok[groups[-1][-1]]
                         and w["start"] - words[groups[-1][-1]]["end"] < GROUP_GAP_S
                         and not _overlap_s(words[groups[-1][-1]]["end"],
-                                           w["start"], forbidden)):
+                                           w["start"], forbid)):
                     groups[-1].append(wi)
                 else:
                     groups.append([wi])
@@ -174,7 +187,7 @@ def run(job_dir: Path, report) -> None:
                     bridge_b = words[g[0]]["start"]
                     if (bridge_b - bridge_a <= bridge_max
                             and _overlap_s(bridge_a, bridge_b, others) <= BRIDGE_FOREIGN_MAX_S
-                            and not _overlap_s(bridge_a, bridge_b, forbidden)):
+                            and not _overlap_s(bridge_a, bridge_b, forbid)):
                         merged[-1].extend(g)
                         continue
                 merged.append(g)

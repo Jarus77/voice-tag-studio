@@ -489,7 +489,13 @@ function setMix(names) {
   refreshLaneStyles();
 }
 
+function speakerOfLane(name) {
+  const m = name.match(/^(?:sam_)?(speaker_\d+)/i);
+  return m ? m[1].toUpperCase() : (name.startsWith("SPEAKER_") ? name : null);
+}
+
 function toggleLane(name) {
+  state.playingSpeaker = null;     // manual mixing: no single owner
   const next = new Set(state.mix);
   if (next.has(name)) {
     if (next.size === 1) return;           // keep at least one lane audible
@@ -499,6 +505,7 @@ function toggleLane(name) {
 }
 
 function soloLane(name, seekTo) {
+  state.playingSpeaker = speakerOfLane(name);
   setMix(new Set([name]));
   if (seekTo != null) player.currentTime = seekTo;
   player.play().catch(() => {});
@@ -547,9 +554,11 @@ function highlightPlaying() {
   const rows = document.querySelectorAll("#transcript .seg");
   let active = null;
   for (const r of rows) {
-    if (t >= parseFloat(r.dataset.start) && t <= parseFloat(r.dataset.end)) {
-      active = r; break;
-    }
+    if (t < parseFloat(r.dataset.start) || t > parseFloat(r.dataset.end)) continue;
+    // clips of DIFFERENT speakers overlap in time — follow the one whose
+    // lane is actually playing, never just the first time-match
+    if (state.playingSpeaker && r.dataset.spk !== state.playingSpeaker) continue;
+    active = r; break;
   }
   if (_lastRow && _lastRow !== active) {
     _lastRow.classList.remove("playing");
@@ -784,6 +793,7 @@ function renderTranscript() {
       }
     }
     row.dataset.seg = seg.seg_id;
+    row.dataset.spk = seg.speaker;
     row.dataset.start = seg.start;
     row.dataset.end = seg.end;
 
@@ -1025,6 +1035,7 @@ function laneNameFor(spk) {
  *  "cutting in", which is NOT the training audio) */
 function soloClipLane(spk) {
   if (!spk) return;
+  state.playingSpeaker = spk;      // karaoke follows THIS speaker's rows
   const lane = laneNameFor(spk);
   if (state.tracks.has(lane) && (state.mix.size !== 1 || !state.mix.has(lane)))
     setMix(new Set([lane]));

@@ -79,7 +79,32 @@ def run(job_dir: Path, report) -> None:
                 continue
             n_kept += 1
             cands.setdefault(c["seg_id"], []).append(c)
-    report(f"{n_kept}/{n_seen} candidates pass their thresholds", 0.3)
+
+    # [pauses] is ALWAYS derived from word timings (silence must be
+    # represented in the text — clips may contain bridged silences up to
+    # ~2s, and untagged silence is a text/audio mismatch). Detector-provided
+    # pauses win where both exist.
+    PAUSE_MIN_S = 0.5
+    n_auto = 0
+    for al in als.values():
+        ws = al.get("words") or []
+        have = [c["position_s"] for c in cands.get(al["seg_id"], [])
+                if c["tag"] == "pauses" and c.get("position_s") is not None]
+        for a, b in zip(ws, ws[1:]):
+            gap = b["start"] - a["end"]
+            if gap < PAUSE_MIN_S:
+                continue
+            mid = (a["end"] + b["start"]) / 2
+            if any(abs(mid - h) < 0.3 for h in have):
+                continue
+            cands.setdefault(al["seg_id"], []).append({
+                "seg_id": al["seg_id"], "tag": "pauses",
+                "score": round(min(1.0, gap / 2.0), 3),
+                "detector": "export_derived", "position_s": round(mid, 2),
+                "evidence": {"gap_s": round(gap, 2)}})
+            n_auto += 1
+    report(f"{n_kept}/{n_seen} candidates pass thresholds · "
+           f"{n_auto} [pauses] auto-derived from word gaps", 0.3)
 
     rows, dropped = [], {}
     for seg in segments:
